@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const productRoutes = require('./routes/products');
 const path = require('path');
+const assistantRoutes = require('./routes/assistant');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -22,6 +23,7 @@ mongoose.connect(process.env.MONGO_URI)
 
 // Routes
 app.use('/api/products', productRoutes);
+app.use('/api/assistant', assistantRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -8,10 +8,20 @@
     "dev": "concurrently --kill-others --names \"BACKEND,FRONTEND\" --prefix-colors \"blue.bold,green.bold\" --prefix \"[{name}]\" \"npm run backend\" \"npm run frontend\"",
     "install-all": "npm install && cd frontend && npm install && cd ../backend && npm install"
   },
-  "keywords": ["react-native", "expo", "nodejs", "mongodb"],
+  "keywords": [
+    "react-native",
+    "expo",
+    "nodejs",
+    "mongodb"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "openai": "^4.87.3",
+    "react-native-blob-util": "^0.21.2",
+    "react-native-pdf": "^6.7.7"
   }
-} 
+}
