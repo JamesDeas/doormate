@@ -38,6 +38,11 @@ const productSchema = new mongoose.Schema({
     required: true,
     unique: true 
   },
+  sku: {
+    type: String,
+    required: true,
+    unique: true
+  },
   brand: {
     type: brandSchema,
     required: true

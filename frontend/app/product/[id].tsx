@@ -405,6 +405,9 @@ export default function ProductDetailsScreen() {
             <Text style={styles.modelNumber}>
               Model: {product.model}
             </Text>
+            <Text style={styles.modelNumber}>
+              SKU: {product.sku}
+            </Text>
           </View>
 
           {renderAIAssistantButton(product, router)}
