@@ -9,15 +9,128 @@ import {
   TouchableOpacity,
   Platform,
   Linking,
+  SafeAreaView,
+  Dimensions,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Product } from '@/types/product';
 import { productApi } from '@/services/api';
 
+// Get base URL for images by removing '/api' from the API_URL
+const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/api$/, '');
+
+// Debug URL construction
+const getFullUrl = (path: string) => {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  
+  // Remove any leading slash to avoid double slashes
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  const fullUrl = `${BASE_URL}/${cleanPath}`;
+  console.log('Constructed URL:', fullUrl); // Add debugging
+  return fullUrl;
+};
+
+const getFullImageUrl = (imagePath: string) => {
+  return getFullUrl(imagePath);
+};
+
+const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
+  <SafeAreaView style={styles.headerContainer}>
+    <View style={styles.header}>
+      <TouchableOpacity 
+        onPress={() => onBack()}
+        style={styles.backButton}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <MaterialCommunityIcons name="arrow-left" size={24} color="#8B0000" />
+      </TouchableOpacity>
+      <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+    </View>
+  </SafeAreaView>
+);
+
+const ImageCarousel = ({ images }: { images: string[] }) => {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  if (!images?.length) return null;
+
+  return (
+    <View style={styles.carouselContainer}>
+      <Image
+        source={{ uri: getFullImageUrl(images[activeIndex]) }}
+        style={styles.carouselImage}
+        resizeMode="cover"
+      />
+      <View style={styles.radioContainer}>
+        {images.map((_, index) => (
+          <TouchableOpacity
+            key={index}
+            onPress={() => setActiveIndex(index)}
+            style={[
+              styles.radioButton,
+              activeIndex === index && styles.radioButtonActive
+            ]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
+
+const renderAIAssistantButton = (product: Product, router: any) => {
+  // Get all manual URLs with proper base URL
+  const manualUrls = product.manuals?.map(manual => ({
+    ...manual,
+    url: getFullUrl(manual.url)
+  }));
+
+  return (
+    <TouchableOpacity
+      style={styles.aiAssistantButton}
+      onPress={() => router.push({
+        pathname: "/(tabs)/assistant",
+        params: {
+          productId: product._id,
+          productType: determineProductType(product),
+          productName: product.title,
+          modelNumber: product.model,
+          manuals: JSON.stringify(manualUrls)
+        }
+      })}
+    >
+      <View style={styles.aiAssistantContent}>
+        <MaterialCommunityIcons name="robot" size={24} color="#FFFFFF" />
+        <Text style={styles.aiAssistantText}>Ask AI Assistant about this product</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// Helper function to determine product type
+const determineProductType = (product: Product): string => {
+  // Determine type based on category
+  switch (product.category) {
+    case 'High-Speed Doors':
+    case 'Personnel Doors':
+    case 'Sectional Doors':
+      return 'door';
+    case 'Gates':
+      return 'gate';
+    case 'Motors':
+      return 'motor';
+    case 'Control Systems':
+      return 'controlSystem';
+    default:
+      return 'door'; // Default fallback
+  }
+};
+
 export default function ProductDetailsScreen() {
+  const router = useRouter();
   const { id } = useLocalSearchParams();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,20 +168,24 @@ export default function ProductDetailsScreen() {
     }
   };
 
-  const handleDownloadManual = async (manual: { url: string; title: string }) => {
+  const handleViewManual = async (manual: { url: string; title: string }) => {
     try {
       if (Platform.OS === 'web') {
-        // For web development, just open the PDF in a new tab
-        window.open(manual.url, '_blank');
+        // For web platform, ensure we're using the correct base URL
+        const fullUrl = getFullUrl(manual.url);
+        console.log('Opening manual URL:', fullUrl);
+        window.open(fullUrl, '_blank');
         return;
       }
 
-      // Mobile-specific code using expo-file-system
-      const downloadedPath = `${FileSystem.documentDirectory}manuals/${manual.title.replace(/\s+/g, '_')}.pdf`;
+      // Rest of the mobile platform code...
+      const urlParts = manual.url.split('/');
+      const subDir = urlParts[urlParts.length - 2];
+      
+      const downloadedPath = `${FileSystem.documentDirectory}manuals/${subDir}/${manual.title.replace(/\s+/g, '_')}.pdf`;
       const fileInfo = await FileSystem.getInfoAsync(downloadedPath);
       
       if (fileInfo.exists) {
-        // Open the downloaded manual
         if (Platform.OS === 'ios') {
           await Linking.openURL(`file://${downloadedPath}`);
         } else {
@@ -79,10 +196,46 @@ export default function ProductDetailsScreen() {
         return;
       }
 
-      // Create manuals directory if it doesn't exist
-      const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.documentDirectory}manuals`);
+      // If not downloaded, open the URL directly
+      await Linking.openURL(getFullUrl(manual.url));
+    } catch (error) {
+      console.error('Error viewing manual:', error);
+      alert('Failed to open manual. Please try again.');
+    }
+  };
+
+  const handleDownloadManual = async (manual: { url: string; title: string }) => {
+    try {
+      if (Platform.OS === 'web') {
+        // For web platform, ensure we're using the correct base URL
+        const fullUrl = getFullUrl(manual.url);
+        console.log('Downloading from URL:', fullUrl);
+        const response = await fetch(fullUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${manual.title}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        return;
+      }
+
+      // Rest of the mobile platform code...
+      const urlParts = manual.url.split('/');
+      const subDir = urlParts[urlParts.length - 2];
+      
+      const downloadedPath = `${FileSystem.documentDirectory}manuals/${subDir}/${manual.title.replace(/\s+/g, '_')}.pdf`;
+      
+      // Create manuals/subDir directory if it doesn't exist
+      const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.documentDirectory}manuals/${subDir}`);
       if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(`${FileSystem.documentDirectory}manuals`, { intermediates: true });
+        await FileSystem.makeDirectoryAsync(`${FileSystem.documentDirectory}manuals/${subDir}`, { intermediates: true });
       }
 
       // Download the manual
@@ -106,14 +259,7 @@ export default function ProductDetailsScreen() {
       await AsyncStorage.setItem('downloadedManuals', JSON.stringify(updatedManuals));
       setDownloadedManuals(updatedManuals);
 
-      // Open the downloaded manual
-      if (Platform.OS === 'ios') {
-        await Linking.openURL(`file://${result.uri}`);
-      } else {
-        await FileSystem.getContentUriAsync(result.uri).then(contentUri => {
-          Linking.openURL(contentUri);
-        });
-      }
+      alert('Manual downloaded successfully!');
     } catch (error) {
       console.error('Error downloading manual:', error);
       alert('Failed to download manual. Please try again.');
@@ -126,28 +272,38 @@ export default function ProductDetailsScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Product Manuals</Text>
         {product.manuals.map((manual, index) => (
-          <TouchableOpacity
-            key={index}
-            style={styles.manualItem}
-            onPress={() => handleDownloadManual(manual)}
-          >
+          <View key={index} style={styles.manualItem}>
             <View style={styles.manualInfo}>
               <MaterialCommunityIcons
-                name={downloadedManuals.includes(manual.title) ? "file-pdf-box" : "file-download"}
+                name="file-pdf-box"
                 size={24}
                 color="#8B0000"
               />
               <View style={styles.manualText}>
                 <Text style={styles.manualTitle}>{manual.title}</Text>
                 <Text style={styles.manualSubtitle}>
-                  {downloadedManuals.includes(manual.title) ? 'Downloaded' : 'Tap to download'}
+                  {downloadedManuals.includes(manual.title) ? 'Downloaded' : 'Available for download'}
                 </Text>
               </View>
+            </View>
+            <View style={styles.manualButtons}>
+              <TouchableOpacity
+                style={[styles.manualButton, styles.viewButton]}
+                onPress={() => handleViewManual(manual)}
+              >
+                <Text style={styles.buttonText}>View</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.manualButton, styles.downloadButton]}
+                onPress={() => handleDownloadManual(manual)}
+              >
+                <Text style={styles.buttonText}>Download</Text>
+              </TouchableOpacity>
             </View>
             {downloadProgress[manual.title] !== undefined && downloadProgress[manual.title] < 1 && (
               <View style={[styles.progressBar, { width: `${downloadProgress[manual.title] * 100}%` }]} />
             )}
-          </TouchableOpacity>
+          </View>
         ))}
       </View>
     );
@@ -229,33 +385,29 @@ export default function ProductDetailsScreen() {
   }
 
   return (
-    <>
-      <Stack.Screen
-        options={{
-          title: product.name,
-          headerBackTitle: 'Back',
-        }}
+    <View style={styles.container}>
+      <ImageCarousel 
+        images={[
+          product.images?.main,
+          ...(product.images?.gallery || [])
+        ].filter(Boolean)}
       />
-      <ScrollView style={styles.container}>
-        {product.images?.main && (
-          <Image
-            source={{ uri: product.images.main }}
-            style={styles.mainImage}
-            resizeMode="cover"
-          />
-        )}
-        
+      <Header 
+        title={product.title} 
+        onBack={() => router.push("/(tabs)/browse")} 
+      />
+      <ScrollView style={styles.scrollView}>
         <View style={styles.content}>
-          <View style={styles.header}>
-            <Text style={styles.productName}>{product.name}</Text>
+          <View style={styles.brandInfo}>
             {product.brand && (
               <Text style={styles.brandName}>{product.brand.name}</Text>
             )}
-            <Text style={styles.modelSku}>
-              Model: {product.model} | SKU: {product.sku}
+            <Text style={styles.modelNumber}>
+              Model: {product.model}
             </Text>
           </View>
 
+          {renderAIAssistantButton(product, router)}
           {renderManuals()}
 
           <View style={styles.section}>
@@ -277,7 +429,7 @@ export default function ProductDetailsScreen() {
           )}
         </View>
       </ScrollView>
-    </>
+    </View>
   );
 }
 
@@ -285,6 +437,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  headerContainer: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    height: 56,
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: -8,
+    marginRight: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333333',
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
   },
   centerContainer: {
     flex: 1,
@@ -300,21 +477,15 @@ const styles = StyleSheet.create({
     height: 300,
     backgroundColor: '#F5F5F5',
   },
-  header: {
+  brandInfo: {
     marginBottom: 20,
-  },
-  productName: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: '#333333',
-    marginBottom: 4,
   },
   brandName: {
     fontSize: 18,
     color: '#666666',
     marginBottom: 4,
   },
-  modelSku: {
+  modelNumber: {
     fontSize: 14,
     color: '#666666',
   },
@@ -399,6 +570,7 @@ const styles = StyleSheet.create({
   manualInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 12,
   },
   manualText: {
     marginLeft: 12,
@@ -414,11 +586,89 @@ const styles = StyleSheet.create({
     color: '#666666',
     marginTop: 2,
   },
+  manualButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  manualButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  viewButton: {
+    backgroundColor: '#666666',
+  },
+  downloadButton: {
+    backgroundColor: '#8B0000',
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
   progressBar: {
     height: 2,
     backgroundColor: '#8B0000',
     position: 'absolute',
     bottom: 0,
     left: 0,
+  },
+  carouselContainer: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#F5F5F5',
+  },
+  carouselImage: {
+    width: '100%',
+    height: '100%',
+  },
+  radioContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'absolute',
+    bottom: 16,
+    width: '100%',
+    gap: 8,
+  },
+  radioButton: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  radioButtonActive: {
+    backgroundColor: '#FFFFFF',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  aiAssistantButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  aiAssistantContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiAssistantText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 }); 

@@ -5,7 +5,6 @@ const { Door, Gate, Motor, ControlSystem } = require('../models/Product');
 const path = require('path');
 const fs = require('fs').promises;
 const PDFParser = require('../utils/pdfParser');
-const vectorStore = require('../utils/vectorStore');
 
 // Debug log for environment variables
 console.log('OpenAI API Key exists:', !!process.env.OPENAI_API_KEY);
@@ -119,37 +118,75 @@ async function getManualContent(manualUrl, query = '') {
   try {
     if (!manualUrl) return '';
     
-    // Remove the base URL part and get just the filename
-    const filename = path.basename(manualUrl);
-    const manualPath = path.join(__dirname, '../public/manuals', filename);
+    // Handle both full URLs and local paths
+    const urlParts = manualUrl.split('/');
+    const filename = urlParts[urlParts.length - 1];
     
-    // First, try to find relevant content from vector store
+    // Get all parts after 'manuals/' to preserve subdirectory structure
+    const manualsIndex = urlParts.indexOf('manuals');
+    const pathAfterManuals = urlParts.slice(manualsIndex + 1).join('/');
+    
+    // Construct the full path including subdirectory structure
+    const manualPath = path.join(process.cwd(), 'public/manuals', pathAfterManuals);
+    
+    console.log('Attempting to read manual from:', manualPath);
+    
+    // Check if file exists
+    try {
+      await fs.access(manualPath);
+    } catch (error) {
+      console.error('Manual file not found:', manualPath);
+      return `Error: Manual file not found at ${manualPath}`;
+    }
+
+    // Extract text from PDF
+    const pdfContent = await PDFParser.extractText(manualPath);
+    
+    // Clean and format the content
+    const cleanContent = pdfContent.text
+      .replace(/\s+/g, ' ')  // Normalize whitespace
+      .trim();
+    
+    // First split by main sections (1., 2., etc.)
+    const mainSections = cleanContent.split(/(?=\d+\.\s)/);
+    
+    // Process each main section and its subsections
+    const processedSections = mainSections
+      .map(section => {
+        // Split section into title and content
+        const match = section.match(/^(\d+\.\s+[^\n-]+)(.+)$/s);
+        if (!match) return section.trim();
+        
+        const [_, title, content] = match;
+        
+        // Split content into bullet points
+        const points = content
+          .split('-')
+          .filter(Boolean)
+          .map(point => point.trim());
+        
+        // Format the section
+        return `${title.trim()}\n${points.map(p => `  - ${p}`).join('\n')}`;
+      })
+      .filter(section => section.length > 0);
+
+    // If there's a query, try to find relevant sections
     if (query) {
-      const searchResults = await vectorStore.search(query, 3);
-      if (searchResults.length > 0) {
-        return searchResults.map(result => {
-          const { text, metadata } = result;
-          return `[Pages ${metadata.pageStart}-${metadata.pageEnd}]: ${text}`;
-        }).join('\n\n');
+      const queryWords = query.toLowerCase().split(/\s+/);
+      const relevantSections = processedSections.filter(section => {
+        const sectionLower = section.toLowerCase();
+        return queryWords.some(word => sectionLower.includes(word));
+      });
+
+      if (relevantSections.length > 0) {
+        return relevantSections.join('\n\n');
       }
     }
 
-    // If no query or no results, extract text from PDF
-    const pdfContent = await PDFParser.extractText(manualPath);
-    
-    // Store the content in vector store for future queries
-    const sections = await PDFParser.extractPages(manualPath);
-    for (const section of sections) {
-      await vectorStore.addManualSection(
-        section.text,
-        filename,
-        { start: section.pageNumber, end: section.pageNumber }
-      );
-    }
-
-    return `Manual '${filename}' content has been processed. You can now ask specific questions about its contents.`;
+    // If no query or no relevant sections found, return all sections
+    return processedSections.join('\n\n');
   } catch (error) {
-    console.error('Error accessing manual:', error);
+    console.error('Error processing manual:', error);
     return `Error processing manual: ${error.message}`;
   }
 }
@@ -161,8 +198,8 @@ router.post('/chat', async (req, res) => {
     const { 
       message, 
       productId, 
-      productType, 
-      manualUrl, 
+      productType,
+      manuals,
       highlightedText,
       previousMessages = []
     } = req.body;
@@ -173,18 +210,40 @@ router.post('/chat', async (req, res) => {
 
     // Get product context and manual content
     const productContext = productId ? await getProductContext(productId, productType) : null;
-    const manualContent = manualUrl ? await getManualContent(manualUrl, message) : '';
+    
+    // Process all manuals if available
+    let manualContents = '';
+    if (manuals) {
+      try {
+        const parsedManuals = JSON.parse(manuals);
+        console.log('Processing manuals:', parsedManuals);
+        for (const manual of parsedManuals) {
+          console.log(`Processing manual: ${manual.title} (${manual.url})`);
+          const content = await getManualContent(manual.url, message);
+          console.log(`Content received for ${manual.title}:`, content.substring(0, 100) + '...');
+          if (content) {
+            if (content.startsWith('Error:')) {
+              console.error(`Error processing manual ${manual.title}:`, content);
+              continue;
+            }
+            manualContents += `\n\n=== ${manual.title} ===\n${content}\n`;
+          }
+        }
+      } catch (error) {
+        console.error('Error processing manuals:', error);
+      }
+    }
 
     // Build the system message with all available context
     let systemContent = BASE_SYSTEM_PROMPT;
     if (productContext) {
       systemContent += `\n\nProduct Context:\n${Object.values(productContext).filter(Boolean).join('\n')}`;
     }
-    if (manualContent) {
-      systemContent += `\n\nRelevant Manual Content:\n${manualContent}`;
+    if (manualContents) {
+      systemContent += `\n\nManual Content:\nBelow are the sections from the product manuals. Each section contains specific information about installation, usage, or maintenance. The content is structured with main sections (1., 2., etc.) and bullet points for detailed steps.\n\nWhen answering questions, please:\n- Cite specific sections by their numbers (e.g., "Section 1" or "Section 3.2")\n- Quote relevant bullet points when providing detailed instructions\n- Maintain the original formatting and numbering in your responses\n\n${manualContents}`;
     }
     if (highlightedText) {
-      systemContent += `\n\nUser has highlighted this text from the manual:\n"${highlightedText}"`;
+      systemContent += `\n\nHighlighted Text:\n"${highlightedText}"\n\nPlease focus on this specific section in your response.`;
     }
 
     // Prepare conversation messages

@@ -13,8 +13,14 @@ const PORT = process.env.PORT || 5001;
 app.use(cors());
 app.use(express.json());
 
-// Serve static files from the public directory
-app.use('/manuals', express.static(path.join(__dirname, 'public/manuals')));
+// Serve static files from the public directory with proper MIME types
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (path.extname(filePath) === '.pdf') {
+      res.set('Content-Type', 'application/pdf');
+    }
+  }
+}));
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI)

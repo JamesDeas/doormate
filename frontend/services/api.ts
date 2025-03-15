@@ -101,7 +101,7 @@ export interface ChatRequest {
   message: string;
   productId?: string;
   productType?: 'door' | 'gate' | 'motor' | 'controlSystem';
-  manualUrl?: string;
+  manuals?: string;  // JSON stringified array of manual objects
   highlightedText?: string;
   previousMessages?: Array<{
     id: string;

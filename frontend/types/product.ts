@@ -38,7 +38,7 @@ export interface Brand {
 export interface Product {
   _id: string;
   id?: string; // Keep for backward compatibility
-  name: string;
+  title: string;
   model: string;
   sku: string;
   brandId: string;

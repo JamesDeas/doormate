@@ -71,7 +71,7 @@ export default function BrowseScreen() {
       onPress={() => handleProductSelect(item)}
     >
       <View style={styles.resultContent}>
-        <Text style={styles.productName}>{item.name}</Text>
+        <Text style={styles.productName}>{item.title}</Text>
         <View style={styles.productMeta}>
           <Text style={styles.brandText}>{item.brand?.name}</Text>
           <Text style={styles.categoryText}>{item.category}</Text>

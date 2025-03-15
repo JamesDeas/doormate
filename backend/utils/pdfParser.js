@@ -1,40 +1,73 @@
 const fs = require('fs').promises;
-const pdf = require('pdf-parse');
+const PDF2JSON = require('pdf2json');
 
 class PDFParser {
   static async extractText(filePath) {
     try {
-      const dataBuffer = await fs.readFile(filePath);
-      const data = await pdf(dataBuffer);
+      console.log('PDFParser: Attempting to read file:', filePath);
+      
+      const pdfParser = new PDF2JSON();
+      
+      const data = await new Promise((resolve, reject) => {
+        pdfParser.on('pdfParser_dataReady', (pdfData) => {
+          resolve(pdfData);
+        });
+        
+        pdfParser.on('pdfParser_dataError', (error) => {
+          reject(error);
+        });
+        
+        pdfParser.loadPDF(filePath);
+      });
+      
+      console.log('PDFParser: Successfully parsed PDF:', {
+        pages: data.Pages.length
+      });
+      
+      // Convert all pages to text
+      const text = data.Pages.map(page => 
+        page.Texts.map(text => decodeURIComponent(text.R[0].T)).join(' ')
+      ).join('\n\n');
       
       return {
-        text: data.text,
-        numPages: data.numpages,
-        info: data.info,
-        metadata: data.metadata,
-        version: data.version
+        text,
+        numPages: data.Pages.length,
+        info: {},
+        metadata: {},
+        version: '1.0'
       };
     } catch (error) {
-      console.error('Error parsing PDF:', error);
+      console.error('PDFParser: Error parsing PDF:', error);
       throw new Error(`Failed to parse PDF: ${error.message}`);
     }
   }
 
   static async extractPages(filePath) {
     try {
-      const dataBuffer = await fs.readFile(filePath);
-      const data = await pdf(dataBuffer);
+      console.log('PDFParser: Attempting to extract pages from:', filePath);
       
-      // Split text into pages (basic implementation)
-      const pages = data.text.split(/\f/);
+      const pdfParser = new PDF2JSON();
       
-      return pages.map((pageText, index) => ({
-        pageNumber: index + 1,
-        text: pageText.trim(),
+      const data = await new Promise((resolve, reject) => {
+        pdfParser.on('pdfParser_dataReady', (pdfData) => {
+          resolve(pdfData);
+        });
+        
+        pdfParser.on('pdfParser_dataError', (error) => {
+          reject(error);
+        });
+        
+        pdfParser.loadPDF(filePath);
+      });
+      
+      // Convert each page to a section
+      return data.Pages.map((page, index) => ({
+        text: page.Texts.map(text => decodeURIComponent(text.R[0].T)).join(' '),
+        pageNumber: index + 1
       }));
     } catch (error) {
-      console.error('Error extracting PDF pages:', error);
-      throw new Error(`Failed to extract PDF pages: ${error.message}`);
+      console.error('PDFParser: Error extracting pages:', error);
+      throw new Error(`Failed to extract pages: ${error.message}`);
     }
   }
 
@@ -46,8 +79,8 @@ class PDFParser {
         .map(page => page.text)
         .join('\n\n');
     } catch (error) {
-      console.error('Error extracting PDF section:', error);
-      throw new Error(`Failed to extract PDF section: ${error.message}`);
+      console.error('PDFParser: Error extracting section:', error);
+      throw new Error(`Failed to extract section: ${error.message}`);
     }
   }
 }

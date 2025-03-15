@@ -69,7 +69,7 @@ const seedData = async () => {
       manuals: [
         {
           title: "Installation Manual",
-          url: "http://192.168.0.158:5001/manuals/hs100-install.pdf",
+          url: "/manuals/hs100-install.pdf",
           type: "installation",
           language: "English",
           version: "1.0",
@@ -78,7 +78,7 @@ const seedData = async () => {
         },
         {
           title: "User Guide",
-          url: "http://192.168.0.158:5001/manuals/hs100-user.pdf",
+          url: "/manuals/hs100-user.pdf",
           type: "user",
           language: "English",
           version: "1.1",
@@ -87,7 +87,7 @@ const seedData = async () => {
         },
         {
           title: "Maintenance Guide",
-          url: "https://example.com/manuals/hs100-maintenance.pdf",
+          url: "/manuals/hs100-maintenance.pdf",
           type: "maintenance",
           language: "English",
           version: "1.0",
@@ -97,6 +97,14 @@ const seedData = async () => {
       ],
       metadata: {
         searchKeywords: ['high-speed door', 'roll-up door', 'industrial door', 'rapid door']
+      },
+      images: {
+        main: '/images/products/hs100-main.jpg',
+        gallery: [
+          '/images/products/hs100-gallery1.jpg',
+          '/images/products/hs100-gallery2.jpg',
+          '/images/products/hs100-gallery3.jpg'
+        ]
       }
     });
 
@@ -163,6 +171,13 @@ const seedData = async () => {
       ],
       metadata: {
         searchKeywords: ['sliding gate', 'industrial gate', 'automatic gate']
+      },
+      images: {
+        main: '/images/products/sg200-main.jpg',
+        gallery: [
+          '/images/products/sg200-gallery1.jpg',
+          '/images/products/sg200-gallery2.jpg'
+        ]
       }
     });
 
@@ -230,6 +245,13 @@ const seedData = async () => {
       ],
       metadata: {
         searchKeywords: ['door motor', 'industrial motor', 'sectional door operator']
+      },
+      images: {
+        main: '/images/products/m300-main.jpg',
+        gallery: [
+          '/images/products/m300-gallery1.jpg',
+          '/images/products/m300-gallery2.jpg'
+        ]
       }
     });
 
@@ -302,6 +324,13 @@ const seedData = async () => {
       ],
       metadata: {
         searchKeywords: ['door controller', 'smart controller', 'gate control system']
+      },
+      images: {
+        main: '/images/products/cs100-main.jpg',
+        gallery: [
+          '/images/products/cs100-gallery1.jpg',
+          '/images/products/cs100-gallery2.jpg'
+        ]
       }
     });
 

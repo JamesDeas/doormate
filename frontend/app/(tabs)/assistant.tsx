@@ -37,7 +37,7 @@ export default function AssistantScreen() {
   const productContext = {
     productId: params.productId as string,
     productType: params.productType as 'door' | 'gate' | 'motor' | 'controlSystem',
-    manualUrl: params.manualUrl as string,
+    manuals: params.manuals as string,  // This is already JSON stringified from the product page
     highlightedText: params.highlightedText as string
   };
 
