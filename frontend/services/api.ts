@@ -56,45 +56,49 @@ export interface ProductsResponse {
   currentPage: number;
 }
 
+interface CategoryBrandResponse {
+  category: ProductCategory;
+  brands: {
+    id: string;
+    name: string;
+  }[];
+}
+
 export const productApi = {
-  search: async ({ query, category, limit = 10 }: SearchProductsParams): Promise<Product[]> => {
-    try {
-      const params = new URLSearchParams({
-        q: query,
-        limit: limit.toString(),
-      });
+  search: async ({ query, category, limit }: SearchProductsParams): Promise<Product[]> => {
+    const params = new URLSearchParams();
+    params.append('q', query);
+    if (category) params.append('category', category);
+    if (limit) params.append('limit', limit.toString());
 
-      if (category) {
-        params.append('category', category);
-      }
-
-      const response = await api.get<Product[]>(`/products/search?${params.toString()}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error searching products:', error);
-      throw error;
-    }
+    const response = await fetch(`${API_URL}/products/search?${params}`);
+    if (!response.ok) throw new Error('Failed to search products');
+    return response.json();
   },
 
   getProducts: async (params: GetProductsParams): Promise<ProductsResponse> => {
-    try {
-      const response = await api.get<ProductsResponse>('/products', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      throw error;
-    }
+    const searchParams = new URLSearchParams();
+    if (params.category) searchParams.append('category', params.category);
+    if (params.brandId) searchParams.append('brand', params.brandId);
+    if (params.page) searchParams.append('page', params.page.toString());
+    if (params.limit) searchParams.append('limit', params.limit.toString());
+
+    const response = await fetch(`${API_URL}/products?${searchParams}`);
+    if (!response.ok) throw new Error('Failed to fetch products');
+    return response.json();
   },
 
   getProductById: async (id: string): Promise<Product> => {
-    try {
-      const response = await api.get<Product>(`/products/${id}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching product:', error);
-      throw error;
-    }
+    const response = await fetch(`${API_URL}/products/${id}`);
+    if (!response.ok) throw new Error('Failed to fetch product');
+    return response.json();
   },
+
+  getCategoriesAndBrands: async (): Promise<CategoryBrandResponse[]> => {
+    const response = await fetch(`${API_URL}/products/categories`);
+    if (!response.ok) throw new Error('Failed to fetch categories and brands');
+    return response.json();
+  }
 };
 
 export interface ChatRequest {

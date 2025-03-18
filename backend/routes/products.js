@@ -5,6 +5,62 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 
+// Get all categories with their brands
+router.get('/categories', async (req, res) => {
+  try {
+    // Aggregate to get unique categories and their brands
+    const categories = await Product.aggregate([
+      // First, match only documents with valid category and brand info
+      {
+        $match: {
+          category: { $exists: true, $ne: null },
+          'brand.id': { $exists: true, $ne: null },
+          'brand.name': { $exists: true, $ne: null }
+        }
+      },
+      // Then group by category
+      {
+        $group: {
+          _id: '$category',
+          brands: {
+            $addToSet: {
+              id: '$brand.id',
+              name: '$brand.name'
+            }
+          }
+        }
+      },
+      // Project the final format
+      {
+        $project: {
+          _id: 0,
+          category: '$_id',
+          brands: 1
+        }
+      },
+      // Sort by category name
+      {
+        $sort: { category: 1 }
+      }
+    ]);
+
+    // If no categories found, return empty array instead of error
+    if (!categories || categories.length === 0) {
+      console.log('No categories found in database');
+      return res.json([]);
+    }
+
+    console.log('Categories fetched successfully:', categories);
+    res.json(categories);
+  } catch (error) {
+    console.error('Error in /categories endpoint:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch categories',
+      details: error.message 
+    });
+  }
+});
+
 // Configure multer for image upload
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {

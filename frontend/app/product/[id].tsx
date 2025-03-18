@@ -46,7 +46,7 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
         style={styles.backButton}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       >
-        <MaterialCommunityIcons name="arrow-left" size={24} color="#8B0000" />
+        <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
       </TouchableOpacity>
       <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
     </View>
@@ -277,7 +277,8 @@ export default function ProductDetailsScreen() {
               <MaterialCommunityIcons
                 name="file-pdf-box"
                 size={24}
-                color="#8B0000"
+                color="#fff"
+                style={{ opacity: 0.9 }}
               />
               <View style={styles.manualText}>
                 <Text style={styles.manualTitle}>{manual.title}</Text>
@@ -334,7 +335,12 @@ export default function ProductDetailsScreen() {
         <Text style={styles.sectionTitle}>Features</Text>
         {product.features.map((feature, index) => (
           <View key={index} style={styles.featureItem}>
-            <MaterialCommunityIcons name="check-circle" size={20} color="#8B0000" />
+            <MaterialCommunityIcons 
+              name="check-circle" 
+              size={20} 
+              color="#fff"
+              style={{ opacity: 0.9 }}
+            />
             <Text style={styles.featureText}>{feature}</Text>
           </View>
         ))}
@@ -349,7 +355,12 @@ export default function ProductDetailsScreen() {
         <Text style={styles.sectionTitle}>Applications</Text>
         {product.applications.map((application, index) => (
           <View key={index} style={styles.applicationItem}>
-            <MaterialCommunityIcons name="arrow-right-circle" size={20} color="#666666" />
+            <MaterialCommunityIcons 
+              name="arrow-right-circle" 
+              size={20} 
+              color="#fff"
+              style={{ opacity: 0.9 }}
+            />
             <Text style={styles.applicationText}>{application}</Text>
           </View>
         ))}
@@ -439,12 +450,12 @@ export default function ProductDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#8B0000',
   },
   headerContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: '#8B0000',
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   header: {
     flexDirection: 'row',
@@ -460,7 +471,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
+    color: '#fff',
     flex: 1,
   },
   scrollView: {
@@ -470,7 +481,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#8B0000',
   },
   content: {
     padding: 16,
@@ -478,49 +489,57 @@ const styles = StyleSheet.create({
   mainImage: {
     width: '100%',
     height: 300,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   brandInfo: {
     marginBottom: 20,
   },
   brandName: {
     fontSize: 18,
-    color: '#666666',
+    color: '#fff',
     marginBottom: 4,
+    opacity: 0.9,
   },
   modelNumber: {
     fontSize: 14,
-    color: '#666666',
+    color: '#fff',
+    opacity: 0.7,
   },
   section: {
     marginBottom: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
+    color: '#fff',
     marginBottom: 12,
   },
   description: {
     fontSize: 16,
-    color: '#333333',
+    color: '#fff',
     lineHeight: 24,
+    opacity: 0.8,
   },
   specItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   specKey: {
     fontSize: 16,
-    color: '#666666',
+    color: '#fff',
+    opacity: 0.7,
   },
   specValue: {
     fontSize: 16,
-    color: '#333333',
+    color: '#fff',
     fontWeight: '500',
+    opacity: 0.9,
   },
   featureItem: {
     flexDirection: 'row',
@@ -529,8 +548,9 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 16,
-    color: '#333333',
+    color: '#fff',
     marginLeft: 8,
+    opacity: 0.8,
   },
   applicationItem: {
     flexDirection: 'row',
@@ -539,32 +559,34 @@ const styles = StyleSheet.create({
   },
   applicationText: {
     fontSize: 16,
-    color: '#333333',
+    color: '#fff',
     marginLeft: 8,
+    opacity: 0.8,
   },
   warrantyText: {
     fontSize: 16,
-    color: '#333333',
+    color: '#fff',
+    opacity: 0.8,
   },
   errorText: {
     fontSize: 16,
-    color: '#FF0000',
+    color: '#FF6B6B',
     textAlign: 'center',
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: '#8B0000',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
   retryButtonText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '500',
   },
   manualItem: {
-    backgroundColor: '#F5F5F5',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 8,
     padding: 16,
     marginBottom: 8,
@@ -581,13 +603,15 @@ const styles = StyleSheet.create({
   },
   manualTitle: {
     fontSize: 16,
-    color: '#333333',
+    color: '#fff',
     fontWeight: '500',
+    opacity: 0.9,
   },
   manualSubtitle: {
     fontSize: 14,
-    color: '#666666',
+    color: '#fff',
     marginTop: 2,
+    opacity: 0.7,
   },
   manualButtons: {
     flexDirection: 'row',
@@ -602,27 +626,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   viewButton: {
-    backgroundColor: '#666666',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   downloadButton: {
-    backgroundColor: '#8B0000',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 14,
     fontWeight: '500',
   },
   progressBar: {
     height: 2,
-    backgroundColor: '#8B0000',
+    backgroundColor: '#fff',
     position: 'absolute',
     bottom: 0,
     left: 0,
+    opacity: 0.8,
   },
   carouselContainer: {
     width: '100%',
     height: 300,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   carouselImage: {
     width: '100%',
@@ -641,27 +666,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   radioButtonActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     width: 10,
     height: 10,
     borderRadius: 5,
   },
   aiAssistantButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
     padding: 16,
     marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   aiAssistantContent: {
     flexDirection: 'row',
@@ -669,9 +686,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   aiAssistantText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+    opacity: 0.9,
   },
 }); 
