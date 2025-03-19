@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,10 @@ import {
   Platform,
   SafeAreaView,
   ActivityIndicator,
-  Pressable
+  Pressable,
+  FlatList,
+  Image,
+  Animated
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { assistantApi } from '../../services/api';
@@ -32,6 +35,7 @@ export default function AssistantScreen() {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const collapseAnimation = useRef(new Animated.Value(1)).current;
 
   // Get product context from route params
   const productContext = {
@@ -40,6 +44,37 @@ export default function AssistantScreen() {
     manuals: params.manuals as string,  // This is already JSON stringified from the product page
     highlightedText: params.highlightedText as string
   };
+
+  const generalSuggestions = [
+    "How to maintain a sectional door?",
+    "What are common door issues?",
+    "Safety guidelines for gates",
+    "Motor troubleshooting steps",
+    "Installation best practices",
+    "Maintenance schedule tips"
+  ];
+
+  const productSuggestions = [
+    "How to install this product?",
+    "Maintenance requirements",
+    "Technical specifications",
+    "Common issues and fixes",
+    "Safety guidelines",
+    "Compatible accessories"
+  ];
+
+  const handleSuggestionPress = (suggestion: string) => {
+    setInputText(suggestion);
+  };
+
+  const renderSuggestionItem = ({ item }: { item: string }) => (
+    <TouchableOpacity
+      style={styles.suggestionButton}
+      onPress={() => handleSuggestionPress(item)}
+    >
+      <Text style={styles.suggestionText}>{item}</Text>
+    </TouchableOpacity>
+  );
 
   const handleSend = async () => {
     if (!inputText.trim() || isLoading) return;
@@ -111,6 +146,14 @@ export default function AssistantScreen() {
     }
   };
 
+  useEffect(() => {
+    Animated.timing(collapseAnimation, {
+      toValue: messages.length > 0 ? 0 : 1,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [messages.length]);
+
   // Display product context if available
   const renderProductContext = () => {
     if (!productContext.productId) return null;
@@ -132,6 +175,74 @@ export default function AssistantScreen() {
     );
   };
 
+  const renderHeader = () => {
+    const expandedHeight = collapseAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0%', '100%'],
+    });
+
+    const collapsedOpacity = collapseAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [1, 0],
+    });
+
+    const expandedOpacity = collapseAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 1],
+    });
+
+    return (
+      <View style={styles.headerContainer}>
+        {/* Expanded Header */}
+        <Animated.View 
+          style={[
+            styles.welcomeContainer,
+            { 
+              opacity: expandedOpacity,
+              display: messages.length > 0 ? 'none' : 'flex'
+            }
+          ]}
+        >
+          <Text style={styles.welcomeTitle}>How can I assist you today?</Text>
+          <View style={styles.welcomeContentContainer}>
+            <Image 
+              source={require('@/assets/images/doormate-assistant.png')}
+              style={styles.assistantImage}
+              resizeMode="contain"
+            />
+            <View style={styles.welcomeTextContainer}>
+              <Text style={styles.welcomeText}>
+                <Text>• Installation guidance{'\n'}</Text>
+                <Text>• Maintenance procedures{'\n'}</Text>
+                <Text>• Troubleshooting issues{'\n'}</Text>
+                <Text>• Technical specifications{'\n'}</Text>
+                <Text>• Safety requirements</Text>
+              </Text>
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* Collapsed Header */}
+        <Animated.View 
+          style={[
+            styles.collapsedHeader,
+            { 
+              opacity: collapsedOpacity,
+              display: messages.length === 0 ? 'none' : 'flex'
+            }
+          ]}
+        >
+          <Image 
+            source={require('@/assets/images/doormate-assistant.png')}
+            style={styles.collapsedImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.collapsedTitle}>How can I assist you today?</Text>
+        </Animated.View>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {renderProductContext()}
@@ -146,22 +257,7 @@ export default function AssistantScreen() {
           contentContainerStyle={styles.messagesContent}
           onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
         >
-          {messages.length === 0 && (
-            <View style={styles.welcomeContainer}>
-              <Text style={styles.welcomeTitle}>Welcome to DoorMate Assistant!</Text>
-              <Text style={styles.welcomeText}>
-                I can help you with:
-                {'\n'}- Installation guidance
-                {'\n'}- Maintenance procedures
-                {'\n'}- Troubleshooting issues
-                {'\n'}- Technical specifications
-                {'\n'}- Safety requirements
-              </Text>
-              <Text style={styles.welcomePrompt}>
-                How can I assist you today?
-              </Text>
-            </View>
-          )}
+          {renderHeader()}
           {messages.map((message) => (
             <View
               key={message.id}
@@ -186,6 +282,17 @@ export default function AssistantScreen() {
           ))}
         </ScrollView>
 
+        <View style={styles.suggestionsContainer}>
+          <FlatList
+            data={productContext.productId ? productSuggestions : generalSuggestions}
+            renderItem={renderSuggestionItem}
+            keyExtractor={(item) => item}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.suggestionsList}
+          />
+        </View>
+
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
@@ -194,7 +301,8 @@ export default function AssistantScreen() {
             placeholder={productContext.productId 
               ? "Ask about this product..."
               : "Ask about doors, manuals, or troubleshooting..."}
-            multiline
+            placeholderTextColor="rgba(255, 255, 255, 0.5)"
+            multiline={false}
             maxLength={500}
             onSubmitEditing={handleSend}
             editable={!isLoading}
@@ -205,12 +313,12 @@ export default function AssistantScreen() {
             disabled={!inputText.trim() || isLoading}
           >
             {isLoading ? (
-              <ActivityIndicator size="small" color="#007AFF" />
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
               <Ionicons 
                 name="send" 
                 size={24} 
-                color={inputText.trim() ? '#007AFF' : '#A0A0A0'} 
+                color={inputText.trim() ? '#fff' : 'rgba(255, 255, 255, 0.5)'} 
               />
             )}
           </TouchableOpacity>
@@ -223,53 +331,69 @@ export default function AssistantScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: '#8B0000',
   },
   contextBanner: {
-    backgroundColor: '#E3F2FD',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#BBDEFB',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   contextText: {
     fontSize: 14,
-    color: '#1976D2',
+    color: '#fff',
     fontWeight: '500',
+    opacity: 0.9,
   },
   highlightText: {
     fontSize: 12,
-    color: '#455A64',
+    color: '#fff',
     marginTop: 4,
     fontStyle: 'italic',
+    opacity: 0.7,
   },
   welcomeContainer: {
-    padding: 20,
+    padding: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    margin: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  welcomeContentContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 20,
+    justifyContent: 'space-between',
+  },
+  welcomeTextContainer: {
+    flex: 1,
+    marginLeft: 24,
+  },
+  assistantImage: {
+    width: 180,
+    height: 180,
   },
   welcomeTitle: {
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 16,
-    color: '#2196F3',
+    color: '#fff',
+    opacity: 0.9,
+    textAlign: 'center',
+    marginBottom: 8,
   },
   welcomeText: {
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'left',
-    color: '#455A64',
-    marginBottom: 16,
-  },
-  welcomePrompt: {
     fontSize: 18,
-    fontWeight: '500',
-    color: '#1976D2',
+    lineHeight: 32,
+    color: '#fff',
+    opacity: 0.8,
   },
   messagesContainer: {
     flex: 1,
     paddingHorizontal: 15,
   },
   messagesContent: {
-    paddingTop: 20,
+    paddingTop: 4,
     paddingBottom: 10,
   },
   messageBubble: {
@@ -280,11 +404,11 @@ const styles = StyleSheet.create({
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   assistantMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#E9E9EB',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   messageText: {
     fontSize: 16,
@@ -293,37 +417,40 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   assistantMessageText: {
-    color: '#000000',
+    color: '#FFFFFF',
+    opacity: 0.9,
   },
   errorMessage: {
-    backgroundColor: '#FFE5E5',
+    backgroundColor: 'rgba(255, 107, 107, 0.2)',
   },
   errorMessageText: {
-    color: '#D32F2F',
+    color: '#FF6B6B',
   },
   timestamp: {
     fontSize: 12,
-    color: '#8E8E93',
+    color: 'rgba(255, 255, 255, 0.6)',
     marginTop: 4,
     alignSelf: 'flex-end',
   },
   inputContainer: {
     flexDirection: 'row',
     padding: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderTopWidth: 1,
-    borderTopColor: '#E9E9EB',
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
   },
   input: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 20,
     paddingHorizontal: 15,
-    paddingVertical: 8,
+    height: 44,
     marginRight: 10,
     fontSize: 16,
-    maxHeight: 100,
+    color: '#fff',
+    paddingTop: 0,
+    paddingBottom: 0,
   },
   sendButton: {
     width: 44,
@@ -331,5 +458,53 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  suggestionsContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 8,
+  },
+  suggestionsList: {
+    paddingHorizontal: 8,
+  },
+  suggestionButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  suggestionText: {
+    color: '#fff',
+    fontSize: 14,
+    opacity: 0.9,
+  },
+  headerContainer: {
+    width: '100%',
+  },
+  collapsedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    margin: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  collapsedImage: {
+    width: 40,
+    height: 40,
+    marginRight: 12,
+  },
+  collapsedTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    opacity: 0.9,
   },
 }); 

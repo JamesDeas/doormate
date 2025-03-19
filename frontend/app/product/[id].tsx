@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   Linking,
   SafeAreaView,
   Dimensions,
+  FlatList,
+  Animated,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -55,21 +57,48 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
 
 const ImageCarousel = ({ images }: { images: string[] }) => {
   const [activeIndex, setActiveIndex] = useState(0);
+  const flatListRef = useRef<FlatList>(null);
 
   if (!images?.length) return null;
 
+  const renderImage = ({ item }: { item: string }) => (
+    <Image
+      source={{ uri: getFullImageUrl(item) }}
+      style={styles.carouselImage}
+      resizeMode="cover"
+    />
+  );
+
+  const handleScroll = (event: any) => {
+    const slideSize = event.nativeEvent.layoutMeasurement.width;
+    const offset = event.nativeEvent.contentOffset.x;
+    const activeSlide = Math.floor(offset / slideSize);
+    setActiveIndex(activeSlide);
+  };
+
   return (
     <View style={styles.carouselContainer}>
-      <Image
-        source={{ uri: getFullImageUrl(images[activeIndex]) }}
-        style={styles.carouselImage}
-        resizeMode="cover"
+      <FlatList
+        ref={flatListRef}
+        data={images}
+        renderItem={renderImage}
+        keyExtractor={(item, index) => index.toString()}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
       />
       <View style={styles.radioContainer}>
         {images.map((_, index) => (
           <TouchableOpacity
             key={index}
-            onPress={() => setActiveIndex(index)}
+            onPress={() => {
+              flatListRef.current?.scrollToIndex({
+                index,
+                animated: true
+              });
+            }}
             style={[
               styles.radioButton,
               activeIndex === index && styles.radioButtonActive
@@ -77,6 +106,64 @@ const ImageCarousel = ({ images }: { images: string[] }) => {
           />
         ))}
       </View>
+    </View>
+  );
+};
+
+const AnimatedGlowButton = ({ children, onPress }: { children: React.ReactNode; onPress: () => void }) => {
+  const glowAnimation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnimation, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnimation, {
+          toValue: 0,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  const opacity = glowAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.5, 0.8],
+  });
+
+  const backgroundColor = glowAnimation.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: ['rgba(255, 255, 255, 0.5)', 'rgba(255, 0, 0, 0.8)', 'rgba(255, 255, 255, 0.5)'],
+  });
+
+  return (
+    <View style={styles.animatedButtonContainer}>
+      <Animated.View 
+        style={[
+          styles.glowBackground,
+          { 
+            opacity,
+            backgroundColor,
+            shadowColor: '#FF0000',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.8,
+            shadowRadius: 8,
+            elevation: 8,
+            borderWidth: 1,
+            borderColor: 'rgba(255, 255, 255, 0.3)',
+          }
+        ]} 
+      />
+      <TouchableOpacity
+        style={styles.aiAssistantButton}
+        onPress={onPress}
+      >
+        {children}
+      </TouchableOpacity>
     </View>
   );
 };
@@ -89,8 +176,7 @@ const renderAIAssistantButton = (product: Product, router: any) => {
   }));
 
   return (
-    <TouchableOpacity
-      style={styles.aiAssistantButton}
+    <AnimatedGlowButton
       onPress={() => router.push({
         pathname: "/(tabs)/assistant",
         params: {
@@ -106,7 +192,7 @@ const renderAIAssistantButton = (product: Product, router: any) => {
         <MaterialCommunityIcons name="robot" size={24} color="#FFFFFF" />
         <Text style={styles.aiAssistantText}>Ask AI Assistant about this product</Text>
       </View>
-    </TouchableOpacity>
+    </AnimatedGlowButton>
   );
 };
 
@@ -650,8 +736,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   carouselImage: {
-    width: '100%',
-    height: '100%',
+    width: Dimensions.get('window').width,
+    height: 300,
   },
   radioContainer: {
     flexDirection: 'row',
@@ -674,11 +760,26 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
+  animatedButtonContainer: {
+    position: 'relative',
+    marginBottom: 24,
+  },
+  glowBackground: {
+    position: 'absolute',
+    top: -4,
+    left: -4,
+    right: -4,
+    bottom: -4,
+    borderRadius: 12,
+  },
   aiAssistantButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#8B0000',
     borderRadius: 8,
     padding: 16,
-    marginBottom: 24,
+    position: 'relative',
+    zIndex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   aiAssistantContent: {
     flexDirection: 'row',
