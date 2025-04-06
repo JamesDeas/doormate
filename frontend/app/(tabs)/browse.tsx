@@ -8,6 +8,7 @@ import {
   FlatList,
   ActivityIndicator,
   Animated,
+  SafeAreaView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -57,11 +58,16 @@ export default function BrowseScreen() {
         const category = params.category as ProductCategory;
         const brandId = params.brandId as string;
         await handleBrandSelect(category, brandId);
+      } else if (params.searchQuery) {
+        // Handle search query from home page
+        const query = params.searchQuery as string;
+        setSearchQuery(query);
+        debouncedSearch(query);
       }
     };
 
     initializeFromParams();
-  }, [params.category, params.brandId]);
+  }, [params.category, params.brandId, params.searchQuery]);
 
   const fetchCategoriesAndBrands = async () => {
     try {
@@ -409,13 +415,13 @@ export default function BrowseScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
           <MaterialCommunityIcons name="magnify" size={24} color="#666666" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search products..."
+            placeholder="Search by product name or brand..."
             value={searchQuery}
             onChangeText={handleSearch}
             placeholderTextColor="#666666"
@@ -430,7 +436,7 @@ export default function BrowseScreen() {
         </View>
       </View>
       {renderContent()}
-    </View>
+    </SafeAreaView>
   );
 }
 

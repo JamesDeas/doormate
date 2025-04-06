@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Product, ProductCategory } from '@/types/product';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001/api';
 
@@ -118,43 +119,100 @@ export interface ChatRequest {
 export const assistantApi = {
   chat: async (request: ChatRequest, onChunk: (chunk: string) => void) => {
     try {
-      const response = await fetch(`${API_URL}/assistant/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
+      // Different implementations for web and mobile
+      if (Platform.OS === 'web') {
+        // Web implementation using ReadableStream
+        const response = await fetch(`${API_URL}/assistant/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          body: JSON.stringify(request),
+        });
 
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Response body is not readable');
-      }
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('Response body is not readable');
+        }
 
-      // Process the stream
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-        // Convert the chunk to text
-        const chunk = new TextDecoder().decode(value);
-        const lines = chunk.split('\n');
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        // Process each SSE line
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              onChunk(data.content);
-            } catch (e) {
-              console.error('Error parsing SSE data:', e);
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+
+          for (const event of events) {
+            if (event.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(event.slice(6));
+                onChunk(data.content);
+              } catch (e) {
+                console.error('Error parsing SSE data:', e);
+              }
             }
           }
         }
+
+        if (buffer && buffer.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(buffer.slice(6));
+            onChunk(data.content);
+          } catch (e) {
+            console.error('Error parsing final SSE data:', e);
+          }
+        }
+      } else {
+        // Mobile implementation using XHR
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_URL}/assistant/chat`, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('Accept', 'text/event-stream');
+
+        let buffer = '';
+
+        xhr.onprogress = function() {
+          const newData = xhr.responseText.substring(buffer.length);
+          buffer = xhr.responseText;
+
+          const events = newData.split('\n\n');
+          events.forEach(event => {
+            if (event.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(event.slice(6));
+                onChunk(data.content);
+              } catch (e) {
+                // Ignore parsing errors for incomplete chunks
+              }
+            }
+          });
+        };
+
+        xhr.onerror = function() {
+          throw new Error('Network request failed');
+        };
+
+        xhr.send(JSON.stringify(request));
+
+        // Wait for the request to complete
+        await new Promise((resolve, reject) => {
+          xhr.onload = function() {
+            if (xhr.status === 200) {
+              resolve(undefined);
+            } else {
+              reject(new Error(`Request failed with status ${xhr.status}`));
+            }
+          };
+        });
       }
     } catch (error) {
       console.error('Chat API Error:', error);

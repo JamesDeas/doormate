@@ -204,94 +204,100 @@ router.post('/chat', async (req, res) => {
       previousMessages = []
     } = req.body;
 
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
-    }
-
-    // Get product context and manual content
-    const productContext = productId ? await getProductContext(productId, productType) : null;
-    
-    // Process all manuals if available
-    let manualContents = '';
-    if (manuals) {
-      try {
-        const parsedManuals = JSON.parse(manuals);
-        console.log('Processing manuals:', parsedManuals);
-        for (const manual of parsedManuals) {
-          console.log(`Processing manual: ${manual.title} (${manual.url})`);
-          const content = await getManualContent(manual.url, message);
-          console.log(`Content received for ${manual.title}:`, content.substring(0, 100) + '...');
-          if (content) {
-            if (content.startsWith('Error:')) {
-              console.error(`Error processing manual ${manual.title}:`, content);
-              continue;
-            }
-            manualContents += `\n\n=== ${manual.title} ===\n${content}\n`;
-          }
-        }
-      } catch (error) {
-        console.error('Error processing manuals:', error);
-      }
-    }
-
-    // Build the system message with all available context
-    let systemContent = BASE_SYSTEM_PROMPT;
-    if (productContext) {
-      systemContent += `\n\nProduct Context:\n${Object.values(productContext).filter(Boolean).join('\n')}`;
-    }
-    if (manualContents) {
-      systemContent += `\n\nManual Content:\nBelow are the sections from the product manuals. Each section contains specific information about installation, usage, or maintenance. The content is structured with main sections (1., 2., etc.) and bullet points for detailed steps.\n\nWhen answering questions, please:\n- Cite specific sections by their numbers (e.g., "Section 1" or "Section 3.2")\n- Quote relevant bullet points when providing detailed instructions\n- Maintain the original formatting and numbering in your responses\n\n${manualContents}`;
-    }
-    if (highlightedText) {
-      systemContent += `\n\nHighlighted Text:\n"${highlightedText}"\n\nPlease focus on this specific section in your response.`;
-    }
-
-    // Prepare conversation messages
-    const messages = [
-      { role: "system", content: systemContent },
-      ...previousMessages.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'assistant',
-        content: msg.text
-      })),
-      { role: "user", content: message }
-    ];
-
-    // Create chat completion
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages,
-      stream: true,
-      temperature: 0.7, // Balanced between creativity and accuracy
-      max_tokens: 1000, // Reasonable length for detailed responses
-    });
-
     // Set up SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
 
-    // Stream the response
-    for await (const chunk of completion) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+    // Helper function to send SSE data
+    const sendData = (content) => {
+      res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      // Flush the response to ensure immediate sending
+      if (res.flush) res.flush();
+    };
+
+    // Build the conversation context
+    let contextMessages = [
+      { role: "system", content: BASE_SYSTEM_PROMPT }
+    ];
+
+    // Add product context if available
+    if (productId && productType) {
+      const productContext = await getProductContext(productId, productType);
+      if (productContext) {
+        contextMessages.push({
+          role: "system",
+          content: `Product Context:\n${Object.values(productContext).join('\n')}`
+        });
       }
     }
 
+    // Add manual content if available
+    if (manuals) {
+      try {
+        const parsedManuals = JSON.parse(manuals);
+        for (const manual of parsedManuals) {
+          const manualContent = await getManualContent(manual.url, message);
+          if (manualContent && !manualContent.startsWith('Error')) {
+            contextMessages.push({
+              role: "system",
+              content: `Relevant content from ${manual.title}:\n${manualContent}`
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing manuals:', e);
+      }
+    }
+
+    // Add highlighted text context if available
+    if (highlightedText) {
+      contextMessages.push({
+        role: "system",
+        content: `User has highlighted this text from the manual: "${highlightedText}"`
+      });
+    }
+
+    // Add previous messages
+    previousMessages.forEach(msg => {
+      contextMessages.push({
+        role: msg.sender === 'user' ? 'user' : 'assistant',
+        content: msg.text
+      });
+    });
+
+    // Add current message
+    contextMessages.push({
+      role: "user",
+      content: message
+    });
+
+    // Create streaming completion
+    const stream = await openai.chat.completions.create({
+      model: "gpt-4-turbo-preview",
+      messages: contextMessages,
+      stream: true,
+      temperature: 0.7,
+    });
+
+    // Process the stream
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        sendData(content);
+      }
+    }
+
+    // Send a final newline to ensure the last chunk is flushed
+    res.write('\n');
+    
+    // End the response
     res.end();
   } catch (error) {
-    console.error('Assistant API Error:', {
-      message: error.message,
-      name: error.name,
-      stack: error.stack,
-      cause: error.cause
-    });
-    
-    res.status(500).json({ 
-      error: 'Error processing request',
-      details: error.message,
-      type: error.name
-    });
+    console.error('Chat error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

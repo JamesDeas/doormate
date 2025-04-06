@@ -111,6 +111,17 @@ export default function HomeScreen() {
     });
   };
 
+  const handleSearch = () => {
+    if (searchQuery.trim()) {
+      router.push({
+        pathname: "/browse",
+        params: { searchQuery: searchQuery.trim() }
+      });
+      setSearchQuery('');
+      toggleSearch(false);
+    }
+  };
+
   const renderBrandCard = ({ item }: { item: BrandCard }) => (
     <TouchableOpacity
       style={styles.brandCard}
@@ -187,10 +198,12 @@ export default function HomeScreen() {
               <MaterialCommunityIcons name="magnify" size={24} color="#666" style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search..."
+                placeholder="Search by product name or brand..."
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoFocus
+                onSubmitEditing={handleSearch}
+                returnKeyType="search"
                 onBlur={() => {
                   if (!searchQuery) {
                     toggleSearch(false);

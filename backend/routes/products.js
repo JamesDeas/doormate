@@ -133,10 +133,7 @@ router.get('/search', async (req, res) => {
     const query = {
       $or: [
         { title: searchPattern },
-        { description: searchPattern },
-        { model: searchPattern },
-        { features: searchPattern },
-        { applications: searchPattern }
+        { 'brand.name': searchPattern }
       ]
     };
 
