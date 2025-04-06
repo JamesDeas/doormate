@@ -2,9 +2,73 @@ import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { HapticTab } from '@/components/HapticTab';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useRef } from 'react';
+import { router } from 'expo-router';
+import { useAuth } from '../_layout';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const { checkAuthStatus } = useAuth();
+  const isMounted = useRef(false);
+  
+  // Set mounted ref on mount
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+  
+  // Check authentication status when tabs are opened
+  useEffect(() => {
+    const verifyAuth = async () => {
+      try {
+        // Wait a bit to ensure component is mounted
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Don't continue if component unmounted
+        if (!isMounted.current) return;
+        
+        // Check if token exists
+        const token = await AsyncStorage.getItem('auth_token');
+        
+        if (!token) {
+          console.log('No auth token found in tabs layout, redirecting to login');
+          // Use setTimeout to ensure redirect happens after render
+          setTimeout(() => {
+            if (isMounted.current) {
+              router.replace('/auth/login');
+            }
+          }, 0);
+          return;
+        }
+        
+        // Validate token
+        const isAuth = await checkAuthStatus();
+        if (!isAuth && isMounted.current) {
+          console.log('Invalid auth token in tabs layout, redirecting to login');
+          // Use setTimeout to ensure redirect happens after render
+          setTimeout(() => {
+            if (isMounted.current) {
+              router.replace('/auth/login');
+            }
+          }, 0);
+        }
+      } catch (error) {
+        console.error('Error verifying auth in tabs:', error);
+        if (isMounted.current) {
+          setTimeout(() => {
+            if (isMounted.current) {
+              router.replace('/auth/login');
+            }
+          }, 0);
+        }
+      }
+    };
+    
+    verifyAuth();
+  }, []);
   
   return (
     <Tabs

@@ -3,7 +3,7 @@ import { Product, ProductCategory } from '@/types/product';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001/api';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001/api';
 
 console.log('API_URL:', API_URL); // Log the API URL being used
 
