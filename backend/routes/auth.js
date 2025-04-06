@@ -31,18 +31,39 @@ const authenticateToken = async (req, res, next) => {
 router.post('/signup', async (req, res) => {
   try {
     console.log('Signup request received:', req.body);
-    const { email, password, firstName, lastName, company } = req.body;
+    const { email, password, firstName, lastName, company, username } = req.body;
 
-    if (!email || !password || !firstName || !lastName) {
-      console.log('Missing required fields:', { email, password, firstName, lastName });
+    if (!email || !password || !firstName || !lastName || !username) {
+      console.log('Missing required fields:', { 
+        email: !email,
+        password: !password,
+        firstName: !firstName,
+        lastName: !lastName,
+        username: !username
+      });
       return res.status(400).json({ 
         message: 'Missing required fields',
         details: {
           email: !email,
           password: !password,
           firstName: !firstName,
-          lastName: !lastName
+          lastName: !lastName,
+          username: !username
         }
+      });
+    }
+
+    // Validate username format
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      return res.status(400).json({ 
+        message: 'Username must contain only letters, numbers, and underscores'
+      });
+    }
+
+    // Validate username length
+    if (username.length < 3 || username.length > 20) {
+      return res.status(400).json({ 
+        message: 'Username must be between 3 and 20 characters'
       });
     }
 
@@ -53,16 +74,23 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'Email already registered' });
     }
 
+    // Check if username exists
+    const existingUsername = await User.findOne({ username });
+    if (existingUsername) {
+      return res.status(400).json({ message: 'Username is already taken' });
+    }
+
     // Create new user
     const user = new User({
       email,
       password,
       firstName,
       lastName,
-      company
+      company,
+      username
     });
 
-    console.log('Attempting to save user:', { email, firstName, lastName });
+    console.log('Attempting to save user:', { email, firstName, lastName, username });
     await user.save();
     console.log('User saved successfully');
 
@@ -89,7 +117,7 @@ router.post('/signup', async (req, res) => {
     if (error.name === 'MongoError' || error.name === 'MongoServerError') {
       console.error('MongoDB error code:', error.code);
       if (error.code === 11000) {
-        return res.status(400).json({ message: 'Email already registered' });
+        return res.status(400).json({ message: 'Email or username already registered' });
       }
     }
     
@@ -147,21 +175,91 @@ router.get('/me', authenticateToken, async (req, res) => {
   res.json(req.user.toJSON());
 });
 
+// Check if username is available
+router.get('/check-username/:username', async (req, res) => {
+  try {
+    const { username } = req.params;
+    const user = await User.findOne({ username });
+    res.json({ available: !user });
+  } catch (error) {
+    console.error('Username check error:', error);
+    res.status(500).json({ message: 'Error checking username availability' });
+  }
+});
+
 // Update user profile
 router.put('/me', authenticateToken, async (req, res) => {
   try {
-    const { firstName, lastName, company } = req.body;
+    // Log the update request but truncate potential large image data
+    console.log('Profile update received:', {
+      ...req.body,
+      profileImage: req.body.profileImage ? `[Base64 image data: ${req.body.profileImage.substring(0, 50)}...]` : undefined
+    });
+    
+    const { firstName, lastName, company, username, profileImage } = req.body;
     const user = req.user;
 
-    user.firstName = firstName || user.firstName;
-    user.lastName = lastName || user.lastName;
-    user.company = company || user.company;
+    console.log('Current user data:', {
+      id: user._id,
+      username: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName
+    });
 
+    // Validate required fields
+    if (!firstName || !lastName) {
+      return res.status(400).json({ message: 'First name and last name are required' });
+    }
+
+    if (username && username !== user.username) {
+      console.log(`Username change requested from ${user.username} to ${username}`);
+      // Check if new username is available
+      const existingUser = await User.findOne({ username });
+      if (existingUser) {
+        console.log('Username already taken:', username);
+        return res.status(400).json({ message: 'Username is already taken' });
+      }
+      user.username = username;
+    }
+
+    user.firstName = firstName;
+    user.lastName = lastName;
+    user.company = company !== undefined ? company : user.company;
+    
+    if (profileImage) {
+      try {
+        // Check if image is a valid base64 data URL
+        if (profileImage.startsWith('data:image')) {
+          console.log('Valid image data received, updating profile image');
+          // Calculate size in KB to log
+          const sizeInKB = Math.round(profileImage.length * 0.75 / 1024);
+          console.log(`Image size: approximately ${sizeInKB}KB`);
+          
+          if (sizeInKB > 5000) {
+            console.log('Warning: Image is quite large (>5MB). Consider client-side optimization.');
+          }
+          
+          user.profileImage = profileImage;
+        } else {
+          console.log('Invalid image format received');
+          return res.status(400).json({ message: 'Invalid image format. Must be a data URL.' });
+        }
+      } catch (imageError) {
+        console.error('Error processing image:', imageError);
+        return res.status(400).json({ message: 'Error processing image. Please try again with a smaller or different image.' });
+      }
+    }
+
+    console.log('Saving user profile...');
     await user.save();
+    console.log('Profile updated successfully for user:', user._id);
     res.json(user.toJSON());
   } catch (error) {
-    console.error('Profile update error:', error);
-    res.status(500).json({ message: 'Error updating profile' });
+    console.error('Profile update error details:', error);
+    res.status(500).json({ 
+      message: 'Error updating profile',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

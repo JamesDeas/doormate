@@ -9,6 +9,12 @@ const userSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
+  },
   password: {
     type: String,
     required: true
@@ -26,6 +32,10 @@ const userSchema = new mongoose.Schema({
   company: {
     type: String,
     trim: true
+  },
+  profileImage: {
+    type: String,
+    default: ''
   },
   role: {
     type: String,

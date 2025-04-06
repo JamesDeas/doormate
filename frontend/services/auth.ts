@@ -4,9 +4,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export interface User {
   _id: string;
   email: string;
+  username: string;
   firstName: string;
   lastName: string;
   company?: string;
+  profileImage?: string;
   role: 'user' | 'admin';
   createdAt: string;
   lastLogin?: string;
@@ -25,13 +27,16 @@ export interface LoginCredentials {
 export interface SignupData extends LoginCredentials {
   firstName: string;
   lastName: string;
+  username?: string;
   company?: string;
 }
 
 export interface UpdateProfileData {
   firstName?: string;
   lastName?: string;
+  username?: string;
   company?: string;
+  profileImage?: string;
 }
 
 export interface ChangePasswordData {
@@ -156,26 +161,50 @@ class AuthService {
     return response.json();
   }
 
+  async checkUsernameAvailability(username: string): Promise<boolean> {
+    const response = await fetch(`${API_URL}/auth/check-username/${username}`);
+    
+    if (!response.ok) {
+      throw new Error('Failed to check username availability');
+    }
+
+    const data = await response.json();
+    return data.available;
+  }
+
   async updateProfile(data: UpdateProfileData): Promise<User> {
     if (!this.token) {
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${API_URL}/auth/me`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
+    console.log('Auth service: Sending profile update request:', {
+      ...data,
+      profileImage: data.profileImage ? '[Image data]' : undefined
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to update profile');
-    }
+    try {
+      const response = await fetch(`${API_URL}/auth/me`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
 
-    return response.json();
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        console.error('Auth service: Profile update failed:', responseData);
+        throw new Error(responseData.message || 'Failed to update profile');
+      }
+
+      console.log('Auth service: Profile updated successfully');
+      return responseData;
+    } catch (error) {
+      console.error('Auth service: Error in updateProfile:', error);
+      throw error;
+    }
   }
 
   async changePassword(data: ChangePasswordData): Promise<void> {
@@ -200,6 +229,10 @@ class AuthService {
 
   isAuthenticated(): boolean {
     return !!this.token;
+  }
+
+  getInitials(firstName: string, lastName: string): string {
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
   }
 }
 

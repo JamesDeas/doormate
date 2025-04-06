@@ -10,12 +10,17 @@ import {
   ScrollView,
   Platform,
   Animated,
+  Image,
+  SafeAreaView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { authService, User } from '@/services/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ProfileImage from '@/components/ProfileImage';
+import { debounce } from 'lodash';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -26,12 +31,15 @@ export default function SettingsScreen() {
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
   const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<'valid' | 'invalid' | 'checking' | ''>('');
   const successOpacity = useRef(new Animated.Value(0)).current;
   const isMounted = useRef(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
+    username: '',
     company: '',
+    profileImage: '',
   });
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
@@ -47,6 +55,45 @@ export default function SettingsScreen() {
       isMounted.current = false;
     };
   }, []);
+
+  // Debounced function to check username availability
+  const checkUsername = debounce(async (username: string) => {
+    if (!username || username.trim() === '') {
+      setUsernameStatus('invalid');
+      return;
+    }
+    
+    // If username hasn't changed, it's valid
+    if (user && username === user.username) {
+      setUsernameStatus('valid');
+      return;
+    }
+    
+    // Username validation - alphanumeric and underscore only
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      setUsernameStatus('invalid');
+      return;
+    }
+    
+    // Username must be between 3 and 20 characters
+    if (username.length < 3 || username.length > 20) {
+      setUsernameStatus('invalid');
+      return;
+    }
+    
+    setUsernameStatus('checking');
+    try {
+      const isAvailable = await authService.checkUsernameAvailability(username);
+      if (isMounted.current) {
+        setUsernameStatus(isAvailable ? 'valid' : 'invalid');
+      }
+    } catch (error) {
+      console.error('Error checking username:', error);
+      if (isMounted.current) {
+        setUsernameStatus('');
+      }
+    }
+  }, 500);
 
   // Handle success message animation
   useEffect(() => {
@@ -82,8 +129,13 @@ export default function SettingsScreen() {
       setFormData({
         firstName: userData.firstName,
         lastName: userData.lastName,
+        username: userData.username,
         company: userData.company || '',
+        profileImage: userData.profileImage || '',
       });
+      
+      // Set initial username status to valid since the current username is already valid
+      setUsernameStatus('valid');
     } catch (error) {
       console.error('Error loading user profile:', error);
       Alert.alert('Error', 'Failed to load user profile');
@@ -97,9 +149,48 @@ export default function SettingsScreen() {
   };
 
   const handleSave = async () => {
+    console.log('Save button clicked');
+    
     if (!formData.firstName || !formData.lastName) {
       Alert.alert('Error', 'First name and last name are required');
       return;
+    }
+
+    // Username validation logic
+    if (!formData.username || formData.username.trim() === '') {
+      Alert.alert('Error', 'Username is required');
+      return;
+    }
+
+    // Validate username format
+    if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
+      Alert.alert('Error', 'Username must contain only letters, numbers, and underscores');
+      return;
+    }
+
+    // Validate username length
+    if (formData.username.length < 3 || formData.username.length > 20) {
+      Alert.alert('Error', 'Username must be between 3 and 20 characters');
+      return;
+    }
+
+    // Only validate changed usernames
+    const usernameChanged = user && formData.username !== user.username;
+    if (usernameChanged) {
+      console.log('Username changed from', user?.username, 'to', formData.username);
+      console.log('Current username status:', usernameStatus);
+      
+      // If the status is still checking, wait briefly
+      if (usernameStatus === 'checking') {
+        Alert.alert('Please wait', 'Still checking username availability');
+        return;
+      }
+      
+      // If the status is invalid, block saving
+      if (usernameStatus === 'invalid') {
+        Alert.alert('Error', 'Username is already taken');
+        return;
+      }
     }
 
     // Password validation when changing password
@@ -128,6 +219,11 @@ export default function SettingsScreen() {
     setIsSaving(true);
     try {
       // Update profile
+      console.log('Submitting profile update:', {
+        ...formData,
+        profileImage: formData.profileImage ? '[IMAGE DATA]' : undefined
+      });
+      
       const updatedUser = await authService.updateProfile(formData);
       setUser(updatedUser);
       
@@ -158,6 +254,124 @@ export default function SettingsScreen() {
       Alert.alert('Error', error.message || 'Failed to update profile or password');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Helper function to resize base64 image for better performance (web only)
+  const resizeBase64Image = (base64Str: string): Promise<string> => {
+    // Only implement for web platform
+    if (Platform.OS !== 'web') {
+      return Promise.resolve(base64Str);
+    }
+    
+    return new Promise((resolve, reject) => {
+      try {
+        // Web-only code using browser APIs
+        const img = document.createElement('img');
+        
+        img.onload = () => {
+          // Target size - resize large images to max 800x800px while maintaining aspect ratio
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          
+          let width = img.width;
+          let height = img.height;
+          
+          // Resize if the image is larger than our max dimensions
+          if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+            const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+            width = Math.round(width * ratio);
+            height = Math.round(height * ratio);
+          }
+          
+          // Create a canvas to draw the resized image
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'));
+            return;
+          }
+          
+          // Draw the resized image
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Get the resized image as base64
+          const resizedBase64 = canvas.toDataURL('image/jpeg', 0.7); // Use JPEG with 70% quality
+          resolve(resizedBase64);
+        };
+        
+        img.onerror = () => {
+          reject(new Error('Error loading image'));
+        };
+        
+        // Set the source of the image to the original base64 string
+        img.src = base64Str;
+      } catch (error) {
+        // If any DOM error occurs (which would happen on native platforms),
+        // just return the original image
+        console.log('Image resize error (probably on native platform):', error);
+        resolve(base64Str);
+      }
+    });
+  };
+
+  // Converted image picker for web compatibility
+  const pickImage = async () => {
+    try {
+      // Request permissions if on mobile
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
+          return;
+        }
+      }
+
+      // Launch image picker with correct options for web compatibility
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images', // Use string value instead of enum
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        base64: true, // Request base64 data directly
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedImage = result.assets[0];
+        
+        // Use the base64 data if available (works on web)
+        if (selectedImage.base64) {
+          try {
+            // Create a base64 image URL from the raw base64 data
+            const imageUrl = `data:image/jpeg;base64,${selectedImage.base64}`;
+            
+            // Resize the image if we're on web
+            if (Platform.OS === 'web') {
+              const resizedImageUrl = await resizeBase64Image(imageUrl);
+              setFormData(prev => ({ ...prev, profileImage: resizedImageUrl }));
+            } else {
+              // Just use the original on native platforms
+              setFormData(prev => ({ ...prev, profileImage: imageUrl }));
+            }
+          } catch (resizeError) {
+            console.error('Error resizing image:', resizeError);
+            // Fallback to original image if resize fails
+            const imageUrl = `data:image/jpeg;base64,${selectedImage.base64}`;
+            setFormData(prev => ({ ...prev, profileImage: imageUrl }));
+          }
+        } 
+        // Fallback to just the URI for preview (but won't be stored properly)
+        else if (selectedImage.uri) {
+          setFormData(prev => ({ ...prev, profileImage: selectedImage.uri }));
+          console.warn('Base64 image data not available. Image might not be saved properly.');
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
     }
   };
 
@@ -203,161 +417,246 @@ export default function SettingsScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingBottom: insets.bottom }]}>
-        <ActivityIndicator size="large" color="#fff" />
-      </View>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView 
-      style={styles.container}
-      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 20 }]}
-    >
+    <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
-      </View>
-
-      {successMessage ? (
-        <Animated.View style={[styles.successMessage, { opacity: successOpacity }]}>
-          <MaterialCommunityIcons name="check-circle" size={20} color="#fff" />
-          <Text style={styles.successText}>{successMessage}</Text>
-        </Animated.View>
-      ) : null}
-
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Profile Information</Text>
-          {!isEditing && (
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() => setIsEditing(true)}
-            >
-              <MaterialCommunityIcons name="pencil" size={22} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
-        
-        {isEditing ? (
-          <View style={styles.form}>
-            <TextInput
-              style={styles.input}
-              placeholder="First Name"
-              value={formData.firstName}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, firstName: value }))}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Last Name"
-              value={formData.lastName}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, lastName: value }))}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Company (Optional)"
-              value={formData.company}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, company: value }))}
-            />
-            
-            {/* Password change toggle button */}
-            <TouchableOpacity
-              style={styles.togglePasswordButton}
-              onPress={() => setShowPasswordFields(!showPasswordFields)}
-            >
-              <MaterialCommunityIcons 
-                name={showPasswordFields ? "chevron-up" : "chevron-down"} 
-                size={24} 
-                color="#fff" 
-              />
-              <Text style={styles.togglePasswordText}>
-                {showPasswordFields ? "Hide Password Fields" : "Change Password"}
-              </Text>
-            </TouchableOpacity>
-            
-            {/* Password fields */}
-            {showPasswordFields && (
-              <View style={styles.passwordFields}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Current Password"
-                  value={passwordData.currentPassword}
-                  onChangeText={(value) => setPasswordData(prev => ({ ...prev, currentPassword: value }))}
-                  secureTextEntry
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="New Password"
-                  value={passwordData.newPassword}
-                  onChangeText={(value) => setPasswordData(prev => ({ ...prev, newPassword: value }))}
-                  secureTextEntry
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Confirm New Password"
-                  value={passwordData.confirmPassword}
-                  onChangeText={(value) => setPasswordData(prev => ({ ...prev, confirmPassword: value }))}
-                  secureTextEntry
-                />
-              </View>
-            )}
-            
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={[styles.button, styles.cancelButton]}
-                onPress={() => {
-                  setIsEditing(false);
-                  setShowPasswordFields(false);
-                  setPasswordData({
-                    currentPassword: '',
-                    newPassword: '',
-                    confirmPassword: '',
-                  });
-                  setFormData({
-                    firstName: user?.firstName || '',
-                    lastName: user?.lastName || '',
-                    company: user?.company || '',
-                  });
-                }}
-              >
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, styles.saveButton]}
-                onPress={handleSave}
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={[styles.buttonText, styles.saveButtonText]}>Save</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.profileInfo}>
-            <Text style={styles.label}>Name</Text>
-            <Text style={styles.value}>{user?.firstName} {user?.lastName}</Text>
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>{user?.email}</Text>
-            {user?.company && (
-              <>
-                <Text style={styles.label}>Company</Text>
-                <Text style={styles.value}>{user.company}</Text>
-              </>
-            )}
-          </View>
+        {!isEditing && (
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() => setIsEditing(true)}
+          >
+            <MaterialCommunityIcons name="pencil" size={22} color="#fff" />
+          </TouchableOpacity>
         )}
       </View>
 
-      <TouchableOpacity
-        style={styles.logoutButton}
-        onPress={performLogout}
+      <ScrollView 
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
       >
-        <MaterialCommunityIcons name="logout" size={24} color="#fff" />
-        <Text style={styles.logoutText}>Logout</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        {successMessage ? (
+          <Animated.View style={[styles.successMessage, { opacity: successOpacity }]}>
+            <MaterialCommunityIcons name="check-circle" size={20} color="#fff" />
+            <Text style={styles.successText}>{successMessage}</Text>
+          </Animated.View>
+        ) : null}
+
+        <View style={styles.profileImageSection}>
+          {isEditing ? (
+            <TouchableOpacity onPress={pickImage} style={styles.profileImageContainer}>
+              <ProfileImage 
+                profileImage={formData.profileImage}
+                firstName={formData.firstName}
+                lastName={formData.lastName}
+                size={100}
+                fontSize={36}
+                borderWidth={3}
+              />
+              <View style={styles.editImageOverlay}>
+                <MaterialCommunityIcons name="camera" size={24} color="#fff" />
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <ProfileImage 
+              profileImage={user?.profileImage}
+              firstName={user?.firstName || ''}
+              lastName={user?.lastName || ''}
+              size={100}
+              fontSize={36}
+              borderWidth={3}
+            />
+          )}
+          <Text style={styles.usernameDisplay}>
+            @{user?.username}
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Profile Information</Text>
+          </View>
+          
+          {isEditing ? (
+            <View style={styles.form}>
+              <TextInput
+                style={styles.input}
+                placeholder="First Name"
+                value={formData.firstName}
+                onChangeText={(value) => setFormData(prev => ({ ...prev, firstName: value }))}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Last Name"
+                value={formData.lastName}
+                onChangeText={(value) => setFormData(prev => ({ ...prev, lastName: value }))}
+              />
+              <View>
+                <TextInput
+                  style={[
+                    styles.input,
+                    usernameStatus === 'valid' && styles.validInput,
+                    usernameStatus === 'invalid' && styles.invalidInput
+                  ]}
+                  placeholder="Username *"
+                  value={formData.username}
+                  onChangeText={(value) => {
+                    setFormData(prev => ({ ...prev, username: value }));
+                    
+                    // Clear status when emptying the field
+                    if (!value.trim()) {
+                      setUsernameStatus('invalid');
+                      return;
+                    }
+                    
+                    // If unchanged from current username, it's valid
+                    if (user && value === user.username) {
+                      setUsernameStatus('valid');
+                      return;
+                    }
+                    
+                    // Otherwise check with debounced function
+                    checkUsername(value);
+                  }}
+                  autoCapitalize="none"
+                />
+                {usernameStatus === 'checking' && (
+                  <View style={styles.usernameStatus}>
+                    <ActivityIndicator size="small" color="#fff" />
+                  </View>
+                )}
+                {usernameStatus === 'invalid' && formData.username && (
+                  <Text style={styles.invalidText}>
+                    {!/^[a-zA-Z0-9_]+$/.test(formData.username) 
+                      ? 'Username must contain only letters, numbers, and underscores'
+                      : formData.username.length < 3 || formData.username.length > 20 
+                        ? 'Username must be between 3-20 characters'
+                        : 'Username already taken'}
+                  </Text>
+                )}
+                {usernameStatus === 'valid' && formData.username && user?.username !== formData.username && (
+                  <Text style={styles.validText}>
+                    Username available
+                  </Text>
+                )}
+              </View>
+              <TextInput
+                style={styles.input}
+                placeholder="Company (Optional)"
+                value={formData.company}
+                onChangeText={(value) => setFormData(prev => ({ ...prev, company: value }))}
+              />
+              
+              {/* Password change toggle button */}
+              <TouchableOpacity
+                style={styles.togglePasswordButton}
+                onPress={() => setShowPasswordFields(!showPasswordFields)}
+              >
+                <MaterialCommunityIcons 
+                  name={showPasswordFields ? "chevron-up" : "chevron-down"} 
+                  size={24} 
+                  color="#fff" 
+                />
+                <Text style={styles.togglePasswordText}>
+                  {showPasswordFields ? "Hide Password Fields" : "Change Password"}
+                </Text>
+              </TouchableOpacity>
+              
+              {/* Password fields */}
+              {showPasswordFields && (
+                <View style={styles.passwordFields}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Current Password"
+                    value={passwordData.currentPassword}
+                    onChangeText={(value) => setPasswordData(prev => ({ ...prev, currentPassword: value }))}
+                    secureTextEntry
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="New Password"
+                    value={passwordData.newPassword}
+                    onChangeText={(value) => setPasswordData(prev => ({ ...prev, newPassword: value }))}
+                    secureTextEntry
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Confirm New Password"
+                    value={passwordData.confirmPassword}
+                    onChangeText={(value) => setPasswordData(prev => ({ ...prev, confirmPassword: value }))}
+                    secureTextEntry
+                  />
+                </View>
+              )}
+              
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={[styles.button, styles.cancelButton]}
+                  onPress={() => {
+                    setIsEditing(false);
+                    setShowPasswordFields(false);
+                    setPasswordData({
+                      currentPassword: '',
+                      newPassword: '',
+                      confirmPassword: '',
+                    });
+                    setFormData({
+                      firstName: user?.firstName || '',
+                      lastName: user?.lastName || '',
+                      username: user?.username || '',
+                      company: user?.company || '',
+                      profileImage: user?.profileImage || '',
+                    });
+                  }}
+                >
+                  <Text style={styles.buttonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.button, styles.saveButton]}
+                  onPress={handleSave}
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={[styles.buttonText, styles.saveButtonText]}>Save</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.profileInfo}>
+              <Text style={styles.label}>Name</Text>
+              <Text style={styles.value}>{user?.firstName} {user?.lastName}</Text>
+              <Text style={styles.label}>Email</Text>
+              <Text style={styles.value}>{user?.email}</Text>
+              {user?.company && (
+                <>
+                  <Text style={styles.label}>Company</Text>
+                  <Text style={styles.value}>{user.company}</Text>
+                </>
+              )}
+            </View>
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={performLogout}
+        >
+          <MaterialCommunityIcons name="logout" size={24} color="#fff" />
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -366,19 +665,56 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#8B0000',
   },
-  content: {
-    padding: 20,
-  },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    paddingHorizontal: '4%',
+    paddingTop: Platform.OS === 'ios' ? 60 : 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#fff',
+    backgroundColor: '#8B0000',
+    position: 'relative',
+    justifyContent: 'space-between',
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  profileImageSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  profileImageContainer: {
+    position: 'relative',
+    marginBottom: 10,
+  },
+  editImageOverlay: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  usernameDisplay: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '500',
+    marginTop: 8,
   },
   successMessage: {
     flexDirection: 'row',
@@ -444,6 +780,31 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     fontSize: 16,
     color: '#333',
+  },
+  validInput: {
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+  },
+  invalidInput: {
+    borderWidth: 1,
+    borderColor: '#FF6B6B',
+  },
+  usernameStatus: {
+    position: 'absolute',
+    right: 15,
+    top: 15,
+  },
+  invalidText: {
+    color: '#FF6B6B',
+    fontSize: 12,
+    marginTop: -10,
+    marginBottom: 10,
+  },
+  validText: {
+    color: '#4CAF50',
+    fontSize: 12,
+    marginTop: -10,
+    marginBottom: 10,
   },
   buttonRow: {
     flexDirection: 'row',

@@ -14,6 +14,7 @@ import {
 import { router } from 'expo-router';
 import { authService } from '@/services/auth';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { debounce } from 'lodash';
 
 export default function SignupScreen() {
   const [formData, setFormData] = useState({
@@ -22,14 +23,50 @@ export default function SignupScreen() {
     confirmPassword: '',
     firstName: '',
     lastName: '',
+    username: '',
     company: '',
   });
   const [error, setError] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<'valid' | 'invalid' | 'checking' | ''>('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Debounced function to check username availability
+  const checkUsername = debounce(async (username: string) => {
+    if (!username || username.trim() === '') {
+      setUsernameStatus('');
+      return;
+    }
+    
+    // Username validation - alphanumeric and underscore only
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      setUsernameStatus('invalid');
+      return;
+    }
+    
+    // Username must be between 3 and 20 characters
+    if (username.length < 3 || username.length > 20) {
+      setUsernameStatus('invalid');
+      return;
+    }
+    
+    setUsernameStatus('checking');
+    try {
+      const isAvailable = await authService.checkUsernameAvailability(username);
+      setUsernameStatus(isAvailable ? 'valid' : 'invalid');
+    } catch (error) {
+      console.error('Error checking username:', error);
+      setUsernameStatus('');
+    }
+  }, 500);
+
+  const handleUsernameChange = (value: string) => {
+    updateFormData('username', value);
+    checkUsername(value);
+  };
 
   const handleSignup = async () => {
     // Validate form
-    if (!formData.email || !formData.password || !formData.firstName || !formData.lastName) {
+    if (!formData.email || !formData.password || !formData.firstName || !formData.lastName || !formData.username) {
       setError('Please fill in all required fields');
       return;
     }
@@ -41,6 +78,22 @@ export default function SignupScreen() {
 
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters long');
+      return;
+    }
+
+    // Username validation
+    if (!/^[a-zA-Z0-9_]+$/.test(formData.username)) {
+      setError('Username must contain only letters, numbers, and underscores');
+      return;
+    }
+    
+    if (formData.username.length < 3 || formData.username.length > 20) {
+      setError('Username must be between 3 and 20 characters');
+      return;
+    }
+
+    if (usernameStatus !== 'valid') {
+      setError('Username is invalid or already taken');
       return;
     }
 
@@ -101,6 +154,40 @@ export default function SignupScreen() {
               keyboardType="email-address"
               placeholderTextColor="#666"
             />
+
+            <View>
+              <TextInput
+                style={[
+                  styles.input,
+                  usernameStatus === 'valid' && styles.validInput,
+                  usernameStatus === 'invalid' && styles.invalidInput
+                ]}
+                placeholder="Username *"
+                value={formData.username}
+                onChangeText={handleUsernameChange}
+                autoCapitalize="none"
+                placeholderTextColor="#666"
+              />
+              {usernameStatus === 'checking' && (
+                <View style={styles.usernameStatus}>
+                  <ActivityIndicator size="small" color="#8B0000" />
+                </View>
+              )}
+              {usernameStatus === 'invalid' && formData.username && (
+                <Text style={styles.invalidText}>
+                  {!/^[a-zA-Z0-9_]+$/.test(formData.username) 
+                    ? 'Username must contain only letters, numbers, and underscores'
+                    : formData.username.length < 3 || formData.username.length > 20 
+                      ? 'Username must be between 3-20 characters'
+                      : 'Username already taken'}
+                </Text>
+              )}
+              {usernameStatus === 'valid' && formData.username && (
+                <Text style={styles.validText}>
+                  Username available
+                </Text>
+              )}
+            </View>
 
             <TextInput
               style={styles.input}
@@ -188,6 +275,14 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     fontSize: 16,
   },
+  validInput: {
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+  },
+  invalidInput: {
+    borderWidth: 1,
+    borderColor: '#FF6B6B',
+  },
   button: {
     backgroundColor: '#4A0404',
     padding: 15,
@@ -204,6 +299,23 @@ const styles = StyleSheet.create({
     color: '#FF6B6B',
     marginBottom: 10,
     textAlign: 'center',
+  },
+  usernameStatus: {
+    position: 'absolute',
+    right: 15,
+    top: 15,
+  },
+  validText: {
+    color: '#4CAF50',
+    fontSize: 12,
+    marginTop: -10,
+    marginBottom: 10,
+  },
+  invalidText: {
+    color: '#FF6B6B',
+    fontSize: 12,
+    marginTop: -10,
+    marginBottom: 10,
   },
   linkButton: {
     marginTop: 20,
