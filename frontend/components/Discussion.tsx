@@ -5,10 +5,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  FlatList,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -115,9 +112,9 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
     });
   };
 
-  const renderComment = ({ item }: { item: Comment }) => (
-    <View style={styles.commentContainer}>
-      <View style={styles.commentHeader}>
+  const renderComment = (item: Comment) => (
+    <View key={item._id} style={styles.commentItem}>
+      <View style={styles.commentInfo}>
         <ProfileImage
           profileImage={item.user.profileImage}
           firstName={item.user.firstName}
@@ -125,41 +122,18 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
           size={40}
           fontSize={16}
         />
-        <View style={styles.commentUserInfo}>
+        <View style={styles.commentText}>
           <Text style={styles.username}>@{item.user.username}</Text>
           <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
+          <Text style={styles.commentContent}>{item.text}</Text>
         </View>
       </View>
-      <Text style={styles.commentText}>{item.text}</Text>
     </View>
   );
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Discussion</Text>
-      
-      <View style={styles.discussionArea}>
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#8B0000" />
-          </View>
-        ) : (
-          <FlatList
-            data={comments}
-            renderItem={renderComment}
-            keyExtractor={(item) => item._id}
-            contentContainerStyle={styles.commentsList}
-            showsVerticalScrollIndicator={true}
-            scrollEnabled={true}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <MaterialCommunityIcons name="comment-outline" size={48} color="rgba(255, 255, 255, 0.5)" />
-                <Text style={styles.emptyText}>No comments yet. Be the first to share your experience!</Text>
-              </View>
-            }
-          />
-        )}
-      </View>
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Discussion</Text>
       
       <View style={styles.inputWrapper}>
         <TextInput
@@ -187,84 +161,107 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
           )}
         </TouchableOpacity>
       </View>
+      
+      <View style={styles.discussionArea}>
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#8B0000" />
+          </View>
+        ) : comments.length > 0 ? (
+          <View style={styles.commentsList}>
+            {comments.map(renderComment)}
+          </View>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <MaterialCommunityIcons name="comment-outline" size={48} color="rgba(255, 255, 255, 0.5)" />
+            <Text style={styles.emptyText}>No comments yet. Be the first to share your experience!</Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  section: {
     marginBottom: 24,
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 8,
+    padding: 16,
   },
-  title: {
+  sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 16,
-    padding: 16,
+    marginBottom: 12,
   },
   discussionArea: {
-    height: 400,
+    minHeight: 300,
   },
   loadingContainer: {
     padding: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 200,
   },
   commentsList: {
-    paddingHorizontal: 16,
-    paddingTop: 0,
-    paddingBottom: 16,
+    paddingBottom: 8,
   },
-  commentContainer: {
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  commentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  commentItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 16,
     marginBottom: 8,
+    overflow: 'hidden',
   },
-  commentUserInfo: {
-    marginLeft: 12,
-  },
-  username: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  commentDate: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.5)',
+  commentInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   commentText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  username: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+    opacity: 0.9,
+  },
+  commentDate: {
+    fontSize: 14,
+    color: '#fff',
+    marginTop: 2,
+    opacity: 0.7,
+  },
+  commentContent: {
     fontSize: 16,
     color: '#fff',
     lineHeight: 22,
+    marginTop: 8,
+    opacity: 0.8,
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+    minHeight: 200,
   },
   emptyText: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: 16,
+    lineHeight: 22,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 16,
   },
   input: {
     flex: 1,
-    backgroundColor: 'rgba(139, 0, 0, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 20,
     paddingHorizontal: 15,
     height: 44,
@@ -280,7 +277,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(139, 0, 0, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   submitButtonDisabled: {
     opacity: 0.5,

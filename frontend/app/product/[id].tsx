@@ -41,6 +41,9 @@ const getFullImageUrl = (imagePath: string) => {
   return getFullUrl(imagePath);
 };
 
+// Define tab types
+type TabType = 'description' | 'manuals' | 'details' | 'discussion';
+
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
   <SafeAreaView style={styles.headerContainer}>
     <View style={styles.header}>
@@ -224,6 +227,7 @@ export default function ProductDetailsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{ [key: string]: number }>({});
   const [downloadedManuals, setDownloadedManuals] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('description');
 
   useEffect(() => {
     loadProduct();
@@ -455,6 +459,75 @@ export default function ProductDetailsScreen() {
     );
   };
 
+  // Tab navigation component
+  const TabNavigation = () => {
+    const tabs: { id: TabType; label: string }[] = [
+      { id: 'description', label: 'Description' },
+      { id: 'manuals', label: 'Manuals' },
+      { id: 'details', label: 'Details' },
+      { id: 'discussion', label: 'Discussion' },
+    ];
+
+    return (
+      <View style={styles.tabContainer}>
+        {tabs.map((tab) => (
+          <TouchableOpacity
+            key={tab.id}
+            style={[
+              styles.tabButton,
+              activeTab === tab.id && styles.activeTabButton
+            ]}
+            onPress={() => setActiveTab(tab.id)}
+          >
+            <Text
+              style={[
+                styles.tabLabel,
+                activeTab === tab.id && styles.activeTabLabel
+              ]}
+            >
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
+
+  // Render content based on active tab
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'description':
+        return (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Description</Text>
+            <Text style={styles.description}>{product?.description}</Text>
+          </View>
+        );
+      case 'manuals':
+        return renderManuals();
+      case 'details':
+        return (
+          <>
+            {renderSpecifications()}
+            {renderFeatures()}
+            {renderApplications()}
+            {product?.warranty && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Warranty</Text>
+                <Text style={styles.warrantyText}>
+                  {product.warranty.duration} months - {product.warranty.description}
+                </Text>
+              </View>
+            )}
+          </>
+        );
+      case 'discussion':
+        return <Discussion productId={product?._id || ''} />;
+      default:
+        return null;
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -509,28 +582,12 @@ export default function ProductDetailsScreen() {
           </View>
 
           {renderAIAssistantButton(product, router)}
-          {renderManuals()}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Description</Text>
-            <Text style={styles.description}>{product.description}</Text>
-          </View>
-
-          {renderSpecifications()}
-          {renderFeatures()}
-          {renderApplications()}
-
-          {product.warranty && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Warranty</Text>
-              <Text style={styles.warrantyText}>
-                {product.warranty.duration} months - {product.warranty.description}
-              </Text>
-            </View>
-          )}
           
-          {/* Discussion Section */}
-          <Discussion productId={product._id} />
+          {/* Tab Navigation */}
+          <TabNavigation />
+          
+          {/* Tab Content */}
+          {renderTabContent()}
         </View>
       </ScrollView>
     </View>
@@ -796,5 +853,32 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
     opacity: 0.9,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 8,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  activeTabButton: {
+    backgroundColor: 'rgba(139, 0, 0, 0.5)',
+  },
+  tabLabel: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginLeft: 4,
+  },
+  activeTabLabel: {
+    color: '#fff',
+    fontWeight: '600',
   },
 }); 
