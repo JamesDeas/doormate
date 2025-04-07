@@ -6,6 +6,7 @@ const productRoutes = require('./routes/products');
 const path = require('path');
 const assistantRoutes = require('./routes/assistant');
 const authRoutes = require('./routes/auth');
+const commentRoutes = require('./routes/comments');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -39,6 +40,7 @@ mongoose.connect(process.env.MONGO_URI)
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/assistant', assistantRoutes);
+app.use('/api', commentRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

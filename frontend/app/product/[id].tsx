@@ -20,6 +20,7 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Product } from '@/types/product';
 import { productApi } from '@/services/api';
+import Discussion from '@/components/Discussion';
 
 // Get base URL for images by removing '/api' from the API_URL
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/api$/, '');
@@ -527,6 +528,9 @@ export default function ProductDetailsScreen() {
               </Text>
             </View>
           )}
+          
+          {/* Discussion Section */}
+          <Discussion productId={product._id} />
         </View>
       </ScrollView>
     </View>
