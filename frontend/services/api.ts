@@ -3,6 +3,7 @@ import { Product, ProductCategory } from '@/types/product';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { localDatabase } from '@/services/localDatabase';
 
 // Ensure API_URL includes the /api suffix
 export const API_URL = process.env.EXPO_PUBLIC_API_URL 
@@ -247,6 +248,7 @@ export const savedProductsApi = {
     const token = await AsyncStorage.getItem('auth_token');
     if (!token) throw new Error('Authentication required');
     
+    // First, save the product on the server
     const response = await fetch(`${API_URL}/saved-products/${productId}`, {
       method: 'POST',
       headers: {
@@ -255,6 +257,24 @@ export const savedProductsApi = {
     });
     
     if (!response.ok) throw new Error('Failed to save product');
+    
+    // Then, get the full product data
+    const productResponse = await fetch(`${API_URL}/products/${productId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!productResponse.ok) throw new Error('Failed to fetch product data');
+    
+    const product = await productResponse.json();
+    
+    // Download product images and manuals for offline access
+    const productWithLocalImages = await localDatabase.downloadProductImages(product);
+    const productWithLocalManuals = await localDatabase.downloadProductManuals(productWithLocalImages);
+    
+    // Save the product to local storage
+    await localDatabase.saveProductOffline(productWithLocalManuals);
   },
   
   // Remove a saved product
@@ -262,6 +282,7 @@ export const savedProductsApi = {
     const token = await AsyncStorage.getItem('auth_token');
     if (!token) throw new Error('Authentication required');
     
+    // Remove from server
     const response = await fetch(`${API_URL}/saved-products/${productId}`, {
       method: 'DELETE',
       headers: {
@@ -270,6 +291,9 @@ export const savedProductsApi = {
     });
     
     if (!response.ok) throw new Error('Failed to remove saved product');
+    
+    // Remove from local storage
+    await localDatabase.removeOfflineProduct(productId);
   },
   
   // Check if a product is saved

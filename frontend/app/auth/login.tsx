@@ -14,6 +14,8 @@ import { router } from 'expo-router';
 import { authService } from '@/services/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/app/_layout';
+import { localDatabase } from '@/services/localDatabase';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -22,6 +24,7 @@ export default function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const isMounted = useRef(false);
+  const { isOffline } = useAuth();
 
   // Set mounted ref
   useEffect(() => {
@@ -45,6 +48,20 @@ export default function LoginScreen() {
         
         if (token) {
           try {
+            // Check if we're online
+            const online = await localDatabase.isOnline();
+            
+            // If offline, consider the token valid
+            if (!online) {
+              console.log('Offline mode: using stored token');
+              setTimeout(() => {
+                if (isMounted.current) {
+                  router.replace('/(tabs)');
+                }
+              }, 0);
+              return;
+            }
+            
             // Validate token by making API call
             await authService.getCurrentUser();
             console.log('Valid token found, redirecting to home');
@@ -77,6 +94,12 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     if (!email || !password) {
       setError('Please fill in all fields');
+      return;
+    }
+
+    // Check if we're offline
+    if (isOffline) {
+      setError('Cannot login while offline. Please check your internet connection.');
       return;
     }
 
@@ -136,6 +159,12 @@ export default function LoginScreen() {
         />
 
         <View style={styles.form}>
+          {isOffline && (
+            <View style={styles.offlineBanner}>
+              <Text style={styles.offlineText}>You are offline. Login is not available.</Text>
+            </View>
+          )}
+          
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -144,6 +173,7 @@ export default function LoginScreen() {
             autoCapitalize="none"
             keyboardType="email-address"
             placeholderTextColor="#666"
+            editable={!isOffline}
           />
 
           <TextInput
@@ -153,14 +183,15 @@ export default function LoginScreen() {
             onChangeText={setPassword}
             secureTextEntry
             placeholderTextColor="#666"
+            editable={!isOffline}
           />
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, isOffline && styles.buttonDisabled]}
             onPress={handleLogin}
-            disabled={isLoading}
+            disabled={isLoading || isOffline}
           >
             {isLoading ? (
               <ActivityIndicator color="#fff" />
@@ -176,8 +207,9 @@ export default function LoginScreen() {
                 router.push('/auth/signup');
               }
             }}
+            disabled={isOffline}
           >
-            <Text style={styles.linkText}>
+            <Text style={[styles.linkText, isOffline && styles.linkTextDisabled]}>
               Don't have an account? Sign up
             </Text>
           </TouchableOpacity>
@@ -227,6 +259,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
   },
+  buttonDisabled: {
+    backgroundColor: '#8B8B8B',
+  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
@@ -243,6 +278,20 @@ const styles = StyleSheet.create({
   },
   linkText: {
     color: '#fff',
+    fontSize: 14,
+  },
+  linkTextDisabled: {
+    color: '#ccc',
+  },
+  offlineBanner: {
+    backgroundColor: '#FFE4B5',
+    padding: 10,
+    borderRadius: 5,
+    marginBottom: 15,
+  },
+  offlineText: {
+    color: '#8B4513',
+    textAlign: 'center',
     fontSize: 14,
   },
 }); 

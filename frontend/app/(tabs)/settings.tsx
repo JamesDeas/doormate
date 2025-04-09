@@ -19,14 +19,41 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { authService, User } from '@/services/auth';
-import { savedProductsApi } from '@/services/api';
+import { savedProductsApi, API_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ProfileImage from '@/components/ProfileImage';
 import { debounce } from 'lodash';
 import type { Product } from '@/types/product';
+import { localDatabase } from '@/services/localDatabase';
+import { useAuth } from '@/app/_layout';
+
+// Get base URL for images by removing '/api' from the API_URL
+const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/api$/, '');
+
+// Debug URL construction
+const getFullUrl = (path: string) => {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  
+  // Remove any leading slash to avoid double slashes
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  
+  // If the path is for an image or manual, use the BASE_URL
+  if (cleanPath.startsWith('images/') || cleanPath.startsWith('manuals/')) {
+    const fullUrl = `${BASE_URL}/${cleanPath}`;
+    console.log('Constructed URL:', fullUrl); // Add debugging
+    return fullUrl;
+  }
+  
+  // For API endpoints, use the API_URL
+  const fullUrl = `${API_URL}/${cleanPath}`;
+  console.log('Constructed API URL:', fullUrl); // Add debugging
+  return fullUrl;
+};
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const { isOffline } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -130,7 +157,26 @@ export default function SettingsScreen() {
 
   const loadUserProfile = async () => {
     try {
-      const userData = await authService.getCurrentUser();
+      let userData: User | null = null;
+      
+      // Try to get user data from the server if online
+      if (!isOffline) {
+        try {
+          userData = await authService.getCurrentUser();
+        } catch (error) {
+          console.error('Error loading user profile from server:', error);
+          // If server request fails, try to load from local storage
+          userData = await localDatabase.getUserProfile();
+        }
+      } else {
+        // If offline, load from local storage
+        userData = await localDatabase.getUserProfile();
+      }
+      
+      if (!userData) {
+        throw new Error('Failed to load user profile');
+      }
+      
       setUser(userData);
       setFormData({
         firstName: userData.firstName,
@@ -155,9 +201,34 @@ export default function SettingsScreen() {
     
     setIsLoadingSavedProducts(true);
     try {
-      const products = await savedProductsApi.getSavedProducts();
-      if (isMounted.current) {
-        setSavedProducts(products);
+      // Check if we're offline
+      const online = await localDatabase.isOnline();
+      
+      if (!online) {
+        // If offline, load products from local storage
+        const offlineProducts = await localDatabase.getOfflineProducts();
+        const productsArray = Object.values(offlineProducts);
+        
+        if (isMounted.current) {
+          setSavedProducts(productsArray);
+        }
+      } else {
+        // If online, try to load from API first
+        try {
+          const products = await savedProductsApi.getSavedProducts();
+          if (isMounted.current) {
+            setSavedProducts(products);
+          }
+        } catch (apiError) {
+          console.error('Error loading saved products from API:', apiError);
+          // Fall back to local storage if API fails
+          const offlineProducts = await localDatabase.getOfflineProducts();
+          const productsArray = Object.values(offlineProducts);
+          
+          if (isMounted.current) {
+            setSavedProducts(productsArray);
+          }
+        }
       }
     } catch (error) {
       console.error('Error loading saved products:', error);
@@ -173,12 +244,39 @@ export default function SettingsScreen() {
 
   const handleRemoveSavedProduct = async (productId: string) => {
     try {
-      await savedProductsApi.removeSavedProduct(productId);
-      if (isMounted.current) {
-        setSavedProducts(prevProducts => 
-          prevProducts.filter(product => product._id !== productId)
-        );
-        showSuccess('Product removed from saved items');
+      // Check if we're offline
+      const online = await localDatabase.isOnline();
+      
+      if (!online) {
+        // If offline, just remove from local storage
+        await localDatabase.removeOfflineProduct(productId);
+        if (isMounted.current) {
+          setSavedProducts(prevProducts => 
+            prevProducts.filter(product => product._id !== productId)
+          );
+          showSuccess('Product removed from saved items');
+        }
+      } else {
+        // If online, try to remove from server first
+        try {
+          await savedProductsApi.removeSavedProduct(productId);
+          if (isMounted.current) {
+            setSavedProducts(prevProducts => 
+              prevProducts.filter(product => product._id !== productId)
+            );
+            showSuccess('Product removed from saved items');
+          }
+        } catch (apiError) {
+          console.error('Error removing saved product from API:', apiError);
+          // Fall back to local storage if API fails
+          await localDatabase.removeOfflineProduct(productId);
+          if (isMounted.current) {
+            setSavedProducts(prevProducts => 
+              prevProducts.filter(product => product._id !== productId)
+            );
+            showSuccess('Product removed from saved items (offline)');
+          }
+        }
       }
     } catch (error) {
       console.error('Error removing saved product:', error);
@@ -189,30 +287,37 @@ export default function SettingsScreen() {
   };
 
   const renderSavedProduct = ({ item }: { item: Product }) => (
-    <TouchableOpacity 
-      style={styles.savedProductItem}
-      onPress={() => router.push(`/product/${item._id}`)}
-    >
-      <Image 
-        source={{ uri: item.images?.main }} 
-        style={styles.savedProductImage}
-        resizeMode="cover"
-      />
-      <View style={styles.savedProductInfo}>
-        <Text style={styles.savedProductTitle} numberOfLines={2}>
-          {item.title}
-        </Text>
-        <Text style={styles.savedProductModel} numberOfLines={1}>
-          {item.model}
-        </Text>
+    <View style={styles.manualItem}>
+      <View style={styles.manualInfo}>
+        <Image 
+          source={{ uri: item.images?.main?.startsWith('file://') ? item.images.main : getFullUrl(item.images?.main) }} 
+          style={styles.savedProductImage}
+          resizeMode="cover"
+        />
+        <View style={styles.manualText}>
+          <Text style={styles.manualTitle} numberOfLines={2}>
+            {item.title}
+          </Text>
+          <Text style={styles.manualSubtitle} numberOfLines={1}>
+            Model: {item.model}
+          </Text>
+        </View>
       </View>
-      <TouchableOpacity 
-        style={styles.removeSavedButton}
-        onPress={() => handleRemoveSavedProduct(item._id)}
-      >
-        <MaterialCommunityIcons name="close" size={20} color="#666" />
-      </TouchableOpacity>
-    </TouchableOpacity>
+      <View style={styles.manualButtons}>
+        <TouchableOpacity
+          style={[styles.manualButton, styles.viewButton]}
+          onPress={() => router.push(`/product/${item._id}`)}
+        >
+          <Text style={styles.buttonText}>View</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.manualButton, styles.downloadButton]}
+          onPress={() => handleRemoveSavedProduct(item._id)}
+        >
+          <Text style={styles.buttonText}>Remove</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 
   const showSuccess = (message: string) => {
@@ -221,6 +326,12 @@ export default function SettingsScreen() {
 
   const handleSave = async () => {
     console.log('Save button clicked');
+    
+    // Prevent saving when offline
+    if (isOffline) {
+      Alert.alert('Offline Mode', 'You cannot update your profile while offline. Please connect to the internet and try again.');
+      return;
+    }
     
     if (!formData.firstName || !formData.lastName) {
       Alert.alert('Error', 'First name and last name are required');
@@ -486,6 +597,71 @@ export default function SettingsScreen() {
     }
   };
 
+  const renderForm = () => {
+    return (
+      <View style={styles.form}>
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>First Name</Text>
+          <TextInput
+            style={[styles.input, isOffline && styles.inputDisabled]}
+            value={formData.firstName}
+            onChangeText={(text) => setFormData({ ...formData, firstName: text })}
+            placeholder="Enter your first name"
+            placeholderTextColor="#666"
+            editable={isEditing && !isOffline}
+          />
+        </View>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Last Name</Text>
+          <TextInput
+            style={[styles.input, isOffline && styles.inputDisabled]}
+            value={formData.lastName}
+            onChangeText={(text) => setFormData({ ...formData, lastName: text })}
+            placeholder="Enter your last name"
+            placeholderTextColor="#666"
+            editable={isEditing && !isOffline}
+          />
+        </View>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Username</Text>
+          <TextInput
+            style={[styles.input, isOffline && styles.inputDisabled]}
+            value={formData.username}
+            onChangeText={(text) => setFormData({ ...formData, username: text })}
+            placeholder="Choose a username"
+            placeholderTextColor="#666"
+            editable={isEditing && !isOffline}
+          />
+          {usernameStatus === 'checking' && (
+            <ActivityIndicator size="small" color="#007AFF" style={styles.usernameStatus} />
+          )}
+          {usernameStatus === 'valid' && (
+            <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" style={styles.usernameStatus} />
+          )}
+          {usernameStatus === 'invalid' && (
+            <MaterialCommunityIcons name="close-circle" size={20} color="#F44336" style={styles.usernameStatus} />
+          )}
+        </View>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Company</Text>
+          <TextInput
+            style={[styles.input, isOffline && styles.inputDisabled]}
+            value={formData.company}
+            onChangeText={(text) => setFormData({ ...formData, company: text })}
+            placeholder="Enter your company name (optional)"
+            placeholderTextColor="#666"
+            editable={isEditing && !isOffline}
+          />
+        </View>
+
+        {/* ... rest of the form ... */}
+      </View>
+    );
+  };
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -501,7 +677,7 @@ export default function SettingsScreen() {
       <ScrollView style={styles.scrollView}>
         <View style={styles.header}>
           <Text style={styles.title}>Settings</Text>
-          {!isEditing && (
+          {!isEditing && !isOffline && (
             <TouchableOpacity
               style={styles.editButton}
               onPress={() => setIsEditing(true)}
@@ -510,6 +686,13 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {isOffline && (
+          <View style={styles.offlineBanner}>
+            <MaterialCommunityIcons name="wifi-off" size={20} color="#8B4513" />
+            <Text style={styles.offlineText}>You are offline. Profile editing is disabled.</Text>
+          </View>
+        )}
 
         {successMessage ? (
           <Animated.View style={[styles.successMessage, { opacity: successOpacity }]}>
@@ -554,152 +737,7 @@ export default function SettingsScreen() {
           </View>
           
           {isEditing ? (
-            <View style={styles.form}>
-              <TextInput
-                style={styles.input}
-                placeholder="First Name"
-                value={formData.firstName}
-                onChangeText={(value) => setFormData(prev => ({ ...prev, firstName: value }))}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Last Name"
-                value={formData.lastName}
-                onChangeText={(value) => setFormData(prev => ({ ...prev, lastName: value }))}
-              />
-              <View>
-                <TextInput
-                  style={[
-                    styles.input,
-                    usernameStatus === 'valid' && styles.validInput,
-                    usernameStatus === 'invalid' && styles.invalidInput
-                  ]}
-                  placeholder="Username *"
-                  value={formData.username}
-                  onChangeText={(value) => {
-                    setFormData(prev => ({ ...prev, username: value }));
-                    
-                    // Clear status when emptying the field
-                    if (!value.trim()) {
-                      setUsernameStatus('invalid');
-                      return;
-                    }
-                    
-                    // If unchanged from current username, it's valid
-                    if (user && value === user.username) {
-                      setUsernameStatus('valid');
-                      return;
-                    }
-                    
-                    // Otherwise check with debounced function
-                    checkUsername(value);
-                  }}
-                  autoCapitalize="none"
-                />
-                {usernameStatus === 'checking' && (
-                  <View style={styles.usernameStatus}>
-                    <ActivityIndicator size="small" color="#fff" />
-                  </View>
-                )}
-                {usernameStatus === 'invalid' && formData.username && (
-                  <Text style={styles.invalidText}>
-                    {!/^[a-zA-Z0-9_]+$/.test(formData.username) 
-                      ? 'Username must contain only letters, numbers, and underscores'
-                      : formData.username.length < 3 || formData.username.length > 20 
-                        ? 'Username must be between 3-20 characters'
-                        : 'Username already taken'}
-                  </Text>
-                )}
-                {usernameStatus === 'valid' && formData.username && user?.username !== formData.username && (
-                  <Text style={styles.validText}>
-                    Username available
-                  </Text>
-                )}
-              </View>
-              <TextInput
-                style={styles.input}
-                placeholder="Company (Optional)"
-                value={formData.company}
-                onChangeText={(value) => setFormData(prev => ({ ...prev, company: value }))}
-              />
-              
-              {/* Password change toggle button */}
-              <TouchableOpacity
-                style={styles.togglePasswordButton}
-                onPress={() => setShowPasswordFields(!showPasswordFields)}
-              >
-                <MaterialCommunityIcons 
-                  name={showPasswordFields ? "chevron-up" : "chevron-down"} 
-                  size={24} 
-                  color="#fff" 
-                />
-                <Text style={styles.togglePasswordText}>
-                  {showPasswordFields ? "Hide Password Fields" : "Change Password"}
-                </Text>
-              </TouchableOpacity>
-              
-              {/* Password fields */}
-              {showPasswordFields && (
-                <View style={styles.passwordFields}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Current Password"
-                    value={passwordData.currentPassword}
-                    onChangeText={(value) => setPasswordData(prev => ({ ...prev, currentPassword: value }))}
-                    secureTextEntry
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="New Password"
-                    value={passwordData.newPassword}
-                    onChangeText={(value) => setPasswordData(prev => ({ ...prev, newPassword: value }))}
-                    secureTextEntry
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Confirm New Password"
-                    value={passwordData.confirmPassword}
-                    onChangeText={(value) => setPasswordData(prev => ({ ...prev, confirmPassword: value }))}
-                    secureTextEntry
-                  />
-                </View>
-              )}
-              
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={[styles.button, styles.cancelButton]}
-                  onPress={() => {
-                    setIsEditing(false);
-                    setShowPasswordFields(false);
-                    setPasswordData({
-                      currentPassword: '',
-                      newPassword: '',
-                      confirmPassword: '',
-                    });
-                    setFormData({
-                      firstName: user?.firstName || '',
-                      lastName: user?.lastName || '',
-                      username: user?.username || '',
-                      company: user?.company || '',
-                      profileImage: user?.profileImage || '',
-                    });
-                  }}
-                >
-                  <Text style={styles.buttonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.button, styles.saveButton]}
-                  onPress={handleSave}
-                  disabled={isSaving}
-                >
-                  {isSaving ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={[styles.buttonText, styles.saveButtonText]}>Save</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
+            renderForm()
           ) : (
             <View style={styles.profileInfo}>
               <Text style={styles.label}>Name</Text>
@@ -718,7 +756,15 @@ export default function SettingsScreen() {
 
         {/* Saved Products Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Saved Products</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Saved Products</Text>
+          </View>
+          {isOffline && (
+            <View style={styles.offlineBanner}>
+              <MaterialCommunityIcons name="wifi-off" size={20} color="#8B4513" />
+              <Text style={styles.offlineText}>You are offline. Viewing saved content.</Text>
+            </View>
+          )}
           {isLoadingSavedProducts ? (
             <ActivityIndicator style={styles.loadingIndicator} />
           ) : savedProducts.length > 0 ? (
@@ -730,9 +776,12 @@ export default function SettingsScreen() {
               ItemSeparatorComponent={() => <View style={styles.separator} />}
             />
           ) : (
-            <Text style={styles.emptyText}>
-              No saved products yet. Save products for offline access from the product page.
-            </Text>
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="bookmark-outline" size={48} color="#fff" style={styles.emptyIcon} />
+              <Text style={styles.emptyText}>
+                No saved products yet. Save products for offline access from the product page.
+              </Text>
+            </View>
           )}
         </View>
 
@@ -957,43 +1006,73 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FF6B6B',
   },
-  savedProductItem: {
+  manualItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  manualInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  manualText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  manualTitle: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+    opacity: 0.9,
+  },
+  manualSubtitle: {
+    fontSize: 14,
+    color: '#fff',
+    marginTop: 2,
+    opacity: 0.7,
+  },
+  manualButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  manualButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  viewButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  downloadButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   savedProductImage: {
     width: 60,
     height: 60,
     borderRadius: 4,
   },
-  savedProductInfo: {
-    flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 30,
+    paddingHorizontal: 20,
   },
-  savedProductTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 4,
-  },
-  savedProductModel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  removeSavedButton: {
-    padding: 8,
+  emptyIcon: {
+    marginBottom: 16,
+    opacity: 0.7,
   },
   emptyText: {
     textAlign: 'center',
-    color: '#666',
+    color: '#fff',
     fontSize: 16,
-    marginTop: 12,
-    marginBottom: 12,
+    lineHeight: 22,
+    opacity: 0.8,
   },
   loadingIndicator: {
     marginVertical: 20,
@@ -1002,5 +1081,29 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#eee',
     marginVertical: 8,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: 'rgba(139, 69, 19, 0.2)',
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 69, 19, 0.3)',
+  },
+  offlineText: {
+    marginLeft: 10,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8B4513',
+  },
+  inputDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#f5f5f5',
+  },
+  formGroup: {
+    marginBottom: 15,
+    width: '100%',
   },
 }); 

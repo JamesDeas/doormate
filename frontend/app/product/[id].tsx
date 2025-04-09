@@ -20,9 +20,10 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Product } from '@/types/product';
-import { productApi, savedProductsApi } from '@/services/api';
+import { productApi, savedProductsApi, API_URL } from '@/services/api';
 import Discussion from '@/components/Discussion';
 import { authService } from '@/services/auth';
+import { localDatabase } from '@/services/localDatabase';
 
 // Get base URL for images by removing '/api' from the API_URL
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/api$/, '');
@@ -34,8 +35,17 @@ const getFullUrl = (path: string) => {
   
   // Remove any leading slash to avoid double slashes
   const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-  const fullUrl = `${BASE_URL}/${cleanPath}`;
-  console.log('Constructed URL:', fullUrl); // Add debugging
+  
+  // If the path is for an image or manual, use the BASE_URL
+  if (cleanPath.startsWith('images/') || cleanPath.startsWith('manuals/')) {
+    const fullUrl = `${BASE_URL}/${cleanPath}`;
+    console.log('Constructed URL:', fullUrl); // Add debugging
+    return fullUrl;
+  }
+  
+  // For API endpoints, use the API_URL
+  const fullUrl = `${API_URL}/${cleanPath}`;
+  console.log('Constructed API URL:', fullUrl); // Add debugging
   return fullUrl;
 };
 
@@ -90,7 +100,7 @@ const ImageCarousel = ({ images }: { images: string[] }) => {
 
   const renderImage = ({ item }: { item: string }) => (
     <Image
-      source={{ uri: getFullImageUrl(item) }}
+      source={{ uri: item.startsWith('file://') ? item : getFullImageUrl(item) }}
       style={styles.carouselImage}
       resizeMode="cover"
     />
@@ -253,57 +263,57 @@ export default function ProductDetailsScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('description');
   const [isSaved, setIsSaved] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
+    checkAuthStatus();
     loadProduct();
     loadDownloadedManuals();
-    checkAuthStatus();
+    checkOfflineStatus();
   }, [id]);
+
+  const checkOfflineStatus = async () => {
+    const online = await localDatabase.isOnline();
+    setIsOffline(!online);
+  };
 
   const checkAuthStatus = async () => {
     try {
-      const isAuth = authService.isAuthenticated();
-      setIsAuthenticated(isAuth);
+      const token = await AsyncStorage.getItem('auth_token');
+      setIsAuthenticated(!!token);
       
-      if (isAuth && id) {
-        try {
-          const saved = await savedProductsApi.isProductSaved(id as string);
-          setIsSaved(saved);
-        } catch (error) {
-          console.error('Error checking if product is saved:', error);
-        }
+      if (token) {
+        const saved = await savedProductsApi.isProductSaved(id as string);
+        setIsSaved(saved);
       }
-    } catch (error) {
-      console.error('Error checking auth status:', error);
+    } catch (err) {
+      console.error('Error checking auth status:', err);
     }
   };
 
   const toggleSaveProduct = async () => {
-    if (!isAuthenticated) {
-      Alert.alert(
-        'Authentication Required',
-        'Please log in to save products for offline access.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Log In', onPress: () => router.push('/auth/login') }
-        ]
-      );
-      return;
-    }
-
-    if (!product) return;
-
     try {
+      if (!isAuthenticated) {
+        Alert.alert(
+          'Authentication Required',
+          'Please sign in to save products',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Sign In', onPress: () => router.push('/auth/login') }
+          ]
+        );
+        return;
+      }
+
       if (isSaved) {
-        await savedProductsApi.removeSavedProduct(product._id);
+        await savedProductsApi.removeSavedProduct(id as string);
         setIsSaved(false);
       } else {
-        await savedProductsApi.saveProduct(product._id);
+        await savedProductsApi.saveProduct(id as string);
         setIsSaved(true);
       }
-    } catch (error) {
-      console.error('Error toggling saved product:', error);
-      Alert.alert('Error', 'Failed to update saved products. Please try again.');
+    } catch (err) {
+      Alert.alert('Error', 'Failed to update saved status');
     }
   };
 
@@ -322,11 +332,20 @@ export default function ProductDetailsScreen() {
     try {
       setLoading(true);
       setError(null);
+
+      // First check if we have the product in local storage
+      const offlineProduct = await localDatabase.getOfflineProduct(id as string);
+      if (offlineProduct) {
+        setProduct(offlineProduct);
+        setLoading(false);
+        return;
+      }
+
+      // If not in local storage, fetch from API using the productApi service
       const data = await productApi.getProductById(id as string);
       setProduct(data);
     } catch (err) {
-      console.error('Error loading product:', err);
-      setError('Failed to load product details');
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
@@ -630,18 +649,28 @@ export default function ProductDetailsScreen() {
 
   return (
     <View style={styles.container}>
-      <ImageCarousel 
-        images={[
-          product.images?.main,
-          ...(product.images?.gallery || [])
-        ].filter(Boolean)}
-      />
+      {product.images?.gallery?.length > 0 ? (
+        <ImageCarousel 
+          images={[product.images.main, ...product.images.gallery]} 
+        />
+      ) : (
+        <Image
+          source={{ uri: product.images?.main?.startsWith('file://') ? product.images.main : getFullImageUrl(product.images?.main) }}
+          style={styles.productImage}
+          resizeMode="cover"
+        />
+      )}
       <Header 
         title={product.title} 
         onBack={() => router.push("/(tabs)/browse")} 
         isSaved={isSaved}
         onToggleSave={toggleSaveProduct}
       />
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineText}>You are offline. Viewing saved content.</Text>
+        </View>
+      )}
       <ScrollView style={styles.scrollView}>
         <View style={styles.content}>
           <View style={styles.brandInfo}>
@@ -708,7 +737,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
-  mainImage: {
+  productImage: {
     width: '100%',
     height: 300,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -959,5 +988,14 @@ const styles = StyleSheet.create({
   saveButton: {
     padding: 8,
     marginRight: -8,
+  },
+  offlineBanner: {
+    backgroundColor: '#FFE4B5',
+    padding: 8,
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: '#8B4513',
+    fontSize: 14,
   },
 }); 

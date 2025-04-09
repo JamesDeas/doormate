@@ -1,5 +1,12 @@
 import { API_URL } from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import { localDatabase } from './localDatabase';
+
+// Helper function to check if we're in a browser environment
+const isBrowser = () => {
+  return typeof window !== 'undefined';
+};
 
 export interface User {
   _id: string;
@@ -48,13 +55,20 @@ class AuthService {
   private token: string | null = null;
 
   constructor() {
-    this.loadToken();
+    // Only try to load the token if we're in a browser environment
+    if (isBrowser()) {
+      this.loadToken();
+    }
   }
 
   async loadToken() {
     try {
-      this.token = await AsyncStorage.getItem('auth_token');
-      return this.token;
+      // Only try to access AsyncStorage if we're in a browser environment
+      if (isBrowser()) {
+        this.token = await AsyncStorage.getItem('auth_token');
+        return this.token;
+      }
+      return null;
     } catch (error) {
       console.error('Error loading token:', error);
       this.token = null;
@@ -64,7 +78,10 @@ class AuthService {
 
   private async saveToken(token: string) {
     try {
-      await AsyncStorage.setItem('auth_token', token);
+      // Only try to access AsyncStorage if we're in a browser environment
+      if (isBrowser()) {
+        await AsyncStorage.setItem('auth_token', token);
+      }
       this.token = token;
     } catch (error) {
       console.error('Error saving token:', error);
@@ -73,10 +90,13 @@ class AuthService {
 
   private async clearToken() {
     try {
-      console.log('Clearing auth token from AsyncStorage...');
-      await AsyncStorage.removeItem('auth_token');
+      // Only try to access AsyncStorage if we're in a browser environment
+      if (isBrowser()) {
+        console.log('Clearing auth token from AsyncStorage...');
+        await AsyncStorage.removeItem('auth_token');
+        console.log('Auth token cleared successfully');
+      }
       this.token = null;
-      console.log('Auth token cleared successfully');
     } catch (error) {
       console.error('Error clearing token:', error);
     }
@@ -128,7 +148,9 @@ class AuthService {
     try {
       console.log('Auth service: Clearing token from AsyncStorage...');
       // Clear the token
-      await AsyncStorage.removeItem('auth_token');
+      if (isBrowser()) {
+        await AsyncStorage.removeItem('auth_token');
+      }
       this.token = null;
       
       // Return success
@@ -158,7 +180,16 @@ class AuthService {
       throw new Error('Failed to get user profile');
     }
 
-    return response.json();
+    const userData = await response.json();
+    
+    // Save user profile to local storage for offline access
+    try {
+      await localDatabase.saveUserProfile(userData);
+    } catch (error) {
+      console.error('Error saving user profile to local storage:', error);
+    }
+    
+    return userData;
   }
 
   async checkUsernameAvailability(username: string): Promise<boolean> {

@@ -2,8 +2,9 @@ import React, { useEffect, useState, createContext, useContext, useRef } from 'r
 import { Slot, useRouter, useSegments, SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { authService } from '@/services/auth';
-import { View, AppState, AppStateStatus, Alert } from 'react-native';
+import { View, AppState, AppStateStatus, Alert, Text, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { localDatabase } from '@/services/localDatabase';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -16,22 +17,32 @@ interface AuthContextType {
   isAuthenticated: boolean;
   logout: () => Promise<void>;
   checkAuthStatus: () => Promise<boolean>;
+  isOffline: boolean;
 }
 
 export const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   logout: async () => {},
   checkAuthStatus: async () => false,
+  isOffline: false,
 });
 
 // Custom hook to use auth context
 export const useAuth = () => useContext(AuthContext);
+
+// Offline indicator component
+const OfflineIndicator = () => (
+  <View style={styles.offlineContainer}>
+    <Text style={styles.offlineText}>You are offline. Some features may be limited.</Text>
+  </View>
+);
 
 export default function RootLayout() {
   const segments = useSegments();
   const router = useRouter();
   const [initialized, setInitialized] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
   const isMounted = useRef(false);
 
   // Check if the current route is protected
@@ -42,6 +53,10 @@ export default function RootLayout() {
   // Function to check auth token and validate it
   const checkAuthStatus = async (): Promise<boolean> => {
     try {
+      // Check if we're online
+      const online = await localDatabase.isOnline();
+      setIsOffline(!online);
+      
       // Get token from storage
       const token = await AsyncStorage.getItem('auth_token');
       
@@ -49,6 +64,13 @@ export default function RootLayout() {
         console.log('No auth token found');
         setAuthToken(null);
         return false;
+      }
+      
+      // If offline, consider the token valid if it exists
+      if (!online) {
+        console.log('Offline mode: using stored token');
+        setAuthToken(token);
+        return true;
       }
       
       // Validate token by making an API call to /me endpoint
@@ -91,6 +113,7 @@ export default function RootLayout() {
     isAuthenticated: !!authToken,
     logout,
     checkAuthStatus,
+    isOffline,
   };
 
   // Track component mounting state
@@ -109,8 +132,8 @@ export default function RootLayout() {
     const checkAuthOnFocus = async () => {
       const isAuth = await checkAuthStatus();
       
-      // If not authenticated but on protected route, redirect (only if mounted)
-      if (!isAuth && isProtectedRoute() && isMounted.current) {
+      // If not authenticated but on protected route, redirect (only if mounted and online)
+      if (!isAuth && isProtectedRoute() && isMounted.current && !isOffline) {
         console.log('Unauthorized access detected, redirecting to login');
         // Use setTimeout to ensure this happens after render
         setTimeout(() => {
@@ -145,13 +168,15 @@ export default function RootLayout() {
       isAuthenticated, 
       inProtectedRoute, 
       currentSegment: segments[0],
-      token: authToken ? 'exists' : 'missing'
+      token: authToken ? 'exists' : 'missing',
+      isOffline
     });
 
     // Use setTimeout to ensure navigation happens after render
     setTimeout(() => {
       if (isMounted.current) {
-        if (!isAuthenticated && inProtectedRoute) {
+        // Don't redirect to login if offline and we have a token
+        if (!isAuthenticated && inProtectedRoute && !isOffline) {
           console.log('Redirecting to login page - unauthorized');
           router.replace('/auth/login');
         } else if (isAuthenticated && segments[0] === 'auth') {
@@ -160,7 +185,7 @@ export default function RootLayout() {
         }
       }
     }, 100);
-  }, [segments, initialized, authToken]);
+  }, [segments, initialized, authToken, isOffline]);
 
   // Initialize auth on app start
   useEffect(() => {
@@ -187,7 +212,26 @@ export default function RootLayout() {
   return (
     <AuthContext.Provider value={authContextValue}>
       <StatusBar style="light" />
+      {isOffline && <OfflineIndicator />}
       <Slot />
     </AuthContext.Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  offlineContainer: {
+    backgroundColor: '#FFE4B5',
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+  },
+  offlineText: {
+    color: '#8B4513',
+    fontSize: 14,
+  },
+});
