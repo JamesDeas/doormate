@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { ProductCategory } from '@/types/product';
 import { useAuth } from '@/app/_layout';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface BrandCard {
   id: string;
@@ -88,9 +89,13 @@ const brandCards: Partial<Record<ProductCategory, BrandCard[]>> = {
 };
 
 export default function HomeScreen() {
-  const { isOffline } = useAuth();
+  const { isOffline, checkAuthStatus } = useAuth();
+  const insets = useSafeAreaInsets();
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryTimeout, setRetryTimeout] = useState(0);
+  const retryTimerRef = useRef<NodeJS.Timeout>();
   const searchAnimation = useRef(new Animated.Value(0)).current;
 
   const toggleSearch = (show: boolean) => {
@@ -125,38 +130,74 @@ export default function HomeScreen() {
     }
   };
 
+  const handleRetryConnection = async () => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+    setRetryTimeout(30);
+
+    try {
+      await checkAuthStatus();
+    } catch (error) {
+      console.error('Retry failed:', error);
+    }
+
+    // Start countdown
+    const countdownInterval = setInterval(() => {
+      setRetryTimeout((prev) => {
+        if (prev <= 1) {
+          clearInterval(countdownInterval);
+          setIsRetrying(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    retryTimerRef.current = countdownInterval;
+  };
+
+  useEffect(() => {
+    // Clear timeout when component unmounts
+    return () => {
+      if (retryTimerRef.current) {
+        clearInterval(retryTimerRef.current);
+      }
+    };
+  }, []);
+
   const renderBrandCard = ({ item }: { item: BrandCard }) => (
-    <TouchableOpacity
-      style={styles.brandCard}
-      onPress={() => handleBrandPress(item)}
-    >
-      <Image
-        source={item.logo}
-        style={styles.brandLogo}
-        resizeMode="cover"
-      />
-    </TouchableOpacity>
+    <View style={styles.brandCardContainer}>
+      <TouchableOpacity
+        style={styles.brandCard}
+        onPress={() => handleBrandPress(item)}
+      >
+        <Image
+          source={item.logo}
+          style={styles.brandLogo}
+          resizeMode="cover"
+        />
+      </TouchableOpacity>
+    </View>
   );
 
   const renderCategorySection = (category: ProductCategory) => (
     <View key={category} style={styles.categorySection}>
-      <Text style={styles.categoryTitle}>{category}</Text>
-      <FlatList
-        data={brandCards[category]}
-        renderItem={renderBrandCard}
-        keyExtractor={(item) => item.id}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.brandList}
-      />
+      <View style={styles.categoryContainer}>
+        <Text style={styles.categoryTitle}>{category}</Text>
+        <FlatList
+          data={brandCards[category]}
+          renderItem={renderBrandCard}
+          keyExtractor={(item) => item.id}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.brandList}
+        />
+      </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={[
-      styles.container,
-      isOffline && { paddingTop: 36 }
-    ]}>
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Animated.View style={{
           opacity: searchAnimation.interpolate({
@@ -196,7 +237,13 @@ export default function HomeScreen() {
             paddingHorizontal: searchAnimation.interpolate({
               inputRange: [0, 1],
               outputRange: [0, 12]
-            })
+            }),
+            transform: [{
+              translateY: searchAnimation.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, -40]
+              })
+            }]
           }
         ]}>
           {isSearchVisible ? (
@@ -234,14 +281,55 @@ export default function HomeScreen() {
         </Animated.View>
       </View>
 
-      <ScrollView 
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {Object.keys(brandCards).map((category) => 
-          renderCategorySection(category as ProductCategory)
-        )}
-      </ScrollView>
+      {isOffline ? (
+        <View style={styles.offlineContainer}>
+          <View style={styles.welcomeContainer}>
+            <MaterialCommunityIcons 
+              name="wifi-off" 
+              size={48} 
+              color="#fff" 
+              style={styles.offlineIcon} 
+            />
+            <Text style={styles.emptyText}>
+              Brand browsing is unavailable while offline. Please check your internet connection and try again to explore our product categories.
+            </Text>
+            <TouchableOpacity 
+              style={[
+                styles.retryButton,
+                isRetrying && styles.retryButtonDisabled
+              ]}
+              onPress={handleRetryConnection}
+              disabled={isRetrying}
+            >
+              <View style={styles.retryButtonContent}>
+                <MaterialCommunityIcons 
+                  name="refresh" 
+                  size={20} 
+                  color="#fff" 
+                  style={[
+                    styles.retryIcon,
+                    isRetrying && styles.retryIconSpinning
+                  ]} 
+                />
+                <Text style={styles.retryButtonText}>
+                  {isRetrying 
+                    ? `Retry in ${retryTimeout}s` 
+                    : 'Retry Connection'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <ScrollView 
+          style={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          {Object.keys(brandCards).map((category) => 
+            renderCategorySection(category as ProductCategory)
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -291,7 +379,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   categorySection: {
+    paddingVertical: 12,
+  },
+  categoryContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 16,
     paddingVertical: 16,
+    marginHorizontal: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
   categoryTitle: {
     fontSize: 20,
@@ -303,11 +410,31 @@ const styles = StyleSheet.create({
   brandList: {
     paddingHorizontal: 8,
   },
-  brandCard: {
-    width: 300,
-    height: 200,
-    backgroundColor: 'transparent',
+  brandCardContainer: {
+    width: 280,
+    height: 180,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     marginHorizontal: 8,
+    borderRadius: 16,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  brandCard: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     borderRadius: 12,
     ...Platform.select({
@@ -325,5 +452,58 @@ const styles = StyleSheet.create({
   brandLogo: {
     width: '100%',
     height: '100%',
+  },
+  offlineContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 48,
+  },
+  welcomeContainer: {
+    padding: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    margin: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  offlineIcon: {
+    marginBottom: 16,
+    opacity: 0.7,
+    alignSelf: 'center',
+  },
+  emptyText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    opacity: 0.7,
+    lineHeight: 22,
+    marginTop: 16,
+  },
+  retryButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 24,
+    alignSelf: 'center',
+  },
+  retryButtonDisabled: {
+    opacity: 0.5,
+  },
+  retryButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  retryIcon: {
+    marginRight: 8,
+  },
+  retryIconSpinning: {
+    transform: [{ rotate: '45deg' }],
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
 }); 

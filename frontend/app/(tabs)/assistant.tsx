@@ -15,9 +15,12 @@ import {
   Image,
   Animated
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { assistantApi } from '../../services/api';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { localDatabase } from '@/services/localDatabase';
+import NetInfo from '@react-native-community/netinfo';
+import { useAuth } from '@/app/_layout';
 
 interface Message {
   id: string;
@@ -34,6 +37,10 @@ export default function AssistantScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { isOffline, checkAuthStatus } = useAuth();
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryTimeout, setRetryTimeout] = useState(0);
+  const retryTimerRef = useRef<NodeJS.Timeout>();
   const scrollViewRef = useRef<ScrollView>(null);
   const collapseAnimation = useRef(new Animated.Value(1)).current;
 
@@ -154,6 +161,37 @@ export default function AssistantScreen() {
     }).start();
   }, [messages.length]);
 
+  useEffect(() => {
+    // Clear timeout when component unmounts
+    return () => {
+      if (retryTimerRef.current) {
+        clearInterval(retryTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleRetryConnection = async () => {
+    if (isRetrying) return;
+    
+    setIsRetrying(true);
+    setRetryTimeout(30);
+    
+    // Start countdown timer
+    retryTimerRef.current = setInterval(() => {
+      setRetryTimeout(prev => {
+        if (prev <= 1) {
+          clearInterval(retryTimerRef.current);
+          setIsRetrying(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Try to reconnect
+    await checkAuthStatus();
+  };
+
   // Display product context if available
   const renderProductContext = () => {
     if (!productContext.productId) return null;
@@ -190,6 +228,47 @@ export default function AssistantScreen() {
       inputRange: [0, 1],
       outputRange: [0, 1],
     });
+
+    if (isOffline) {
+      return (
+        <View style={styles.welcomeContainer}>
+          <MaterialCommunityIcons 
+            name="wifi-off" 
+            size={48} 
+            color="#fff" 
+            style={styles.offlineIcon} 
+          />
+          <Text style={styles.emptyText}>
+            The AI Assistant is unavailable while offline. Please check your internet connection and try again.
+          </Text>
+          <TouchableOpacity 
+            style={[
+              styles.retryButton,
+              isRetrying && styles.retryButtonDisabled
+            ]}
+            onPress={handleRetryConnection}
+            disabled={isRetrying}
+          >
+            <View style={styles.retryButtonContent}>
+              <MaterialCommunityIcons 
+                name="refresh" 
+                size={20} 
+                color="#fff" 
+                style={[
+                  styles.retryIcon,
+                  isRetrying && styles.retryIconSpinning
+                ]} 
+              />
+              <Text style={styles.retryButtonText}>
+                {isRetrying 
+                  ? `Retry in ${retryTimeout}s` 
+                  : 'Retry Connection'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      );
+    }
 
     return (
       <View style={styles.headerContainer}>
@@ -245,85 +324,128 @@ export default function AssistantScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {renderProductContext()}
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-        >
-          {renderHeader()}
-          {messages.map((message) => (
-            <View
-              key={message.id}
+      {isOffline ? (
+        <View style={styles.offlineContainer}>
+          <View style={styles.welcomeContainer}>
+            <MaterialCommunityIcons 
+              name="wifi-off" 
+              size={48} 
+              color="#fff" 
+              style={styles.offlineIcon} 
+            />
+            <Text style={styles.emptyText}>
+              The AI Assistant is unavailable while offline. Please check your internet connection and try again.
+            </Text>
+            <TouchableOpacity 
               style={[
-                styles.messageBubble,
-                message.sender === 'user' ? styles.userMessage : styles.assistantMessage,
-                message.isError && styles.errorMessage
+                styles.retryButton,
+                isRetrying && styles.retryButtonDisabled
               ]}
+              onPress={handleRetryConnection}
+              disabled={isRetrying}
             >
-              <Text style={[
-                styles.messageText,
-                message.sender === 'user' ? styles.userMessageText : styles.assistantMessageText,
-                message.isError && styles.errorMessageText
-              ]}>
-                {message.text}
-                {message.isStreaming && '▋'}
-              </Text>
-              <Text style={styles.timestamp}>
-                {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </Text>
-            </View>
-          ))}
-        </ScrollView>
-
-        <View style={styles.suggestionsContainer}>
-          <FlatList
-            data={productContext.productId ? productSuggestions : generalSuggestions}
-            renderItem={renderSuggestionItem}
-            keyExtractor={(item) => item}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.suggestionsList}
-          />
+              <View style={styles.retryButtonContent}>
+                <MaterialCommunityIcons 
+                  name="refresh" 
+                  size={20} 
+                  color="#fff" 
+                  style={[
+                    styles.retryIcon,
+                    isRetrying && styles.retryIconSpinning
+                  ]} 
+                />
+                <Text style={styles.retryButtonText}>
+                  {isRetrying 
+                    ? `Retry in ${retryTimeout}s` 
+                    : 'Retry Connection'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
         </View>
-
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder={productContext.productId 
-              ? "Ask about this product..."
-              : "Ask about doors, manuals, or troubleshooting..."}
-            placeholderTextColor="rgba(255, 255, 255, 0.5)"
-            multiline={false}
-            maxLength={500}
-            onSubmitEditing={handleSend}
-            editable={!isLoading}
-          />
-          <TouchableOpacity 
-            style={styles.sendButton} 
-            onPress={handleSend}
-            disabled={!inputText.trim() || isLoading}
+      ) : (
+        <>
+          {renderProductContext()}
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.container}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons 
-                name="send" 
-                size={24} 
-                color={inputText.trim() ? '#fff' : 'rgba(255, 255, 255, 0.5)'} 
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              contentContainerStyle={styles.messagesContent}
+              onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+            >
+              {renderHeader()}
+              {messages.map((message) => (
+                <View
+                  key={message.id}
+                  style={[
+                    styles.messageBubble,
+                    message.sender === 'user' ? styles.userMessage : styles.assistantMessage,
+                    message.isError && styles.errorMessage
+                  ]}
+                >
+                  <Text style={[
+                    styles.messageText,
+                    message.sender === 'user' ? styles.userMessageText : styles.assistantMessageText,
+                    message.isError && styles.errorMessageText
+                  ]}>
+                    {message.text}
+                    {message.isStreaming && '▋'}
+                  </Text>
+                  <Text style={styles.timestamp}>
+                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={styles.suggestionsContainer}>
+              <FlatList
+                data={productContext.productId ? productSuggestions : generalSuggestions}
+                renderItem={renderSuggestionItem}
+                keyExtractor={(item) => item}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.suggestionsList}
               />
-            )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder={productContext.productId 
+                  ? "Ask about this product..."
+                  : "Ask about doors, manuals, or troubleshooting..."}
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                multiline={false}
+                maxLength={500}
+                onSubmitEditing={handleSend}
+                editable={!isLoading}
+              />
+              <TouchableOpacity 
+                style={styles.sendButton} 
+                onPress={handleSend}
+                disabled={!inputText.trim() || isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons 
+                    name="send" 
+                    size={24} 
+                    color={inputText.trim() ? '#fff' : 'rgba(255, 255, 255, 0.5)'} 
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -332,6 +454,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#8B0000',
+  },
+  offlineContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 48,
+  },
+  welcomeContainer: {
+    padding: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    margin: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  offlineIcon: {
+    marginBottom: 16,
+    opacity: 0.7,
+    alignSelf: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 22,
   },
   contextBanner: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -351,14 +499,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontStyle: 'italic',
     opacity: 0.7,
-  },
-  welcomeContainer: {
-    padding: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    margin: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   welcomeContentContainer: {
     flexDirection: 'row',
@@ -506,5 +646,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
     opacity: 0.9,
+  },
+  retryButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 24,
+    alignSelf: 'center',
+  },
+  retryButtonDisabled: {
+    opacity: 0.5,
+  },
+  retryButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  retryIcon: {
+    marginRight: 8,
+  },
+  retryIconSpinning: {
+    transform: [{ rotate: '45deg' }],
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
 }); 

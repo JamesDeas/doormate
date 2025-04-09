@@ -719,21 +719,26 @@ export default function SettingsScreen() {
   }
 
   return (
-    <SafeAreaView style={[
-      styles.container,
-      isOffline && { paddingTop: 36 }
-    ]}>
-      <ScrollView style={styles.scrollView}>
+    <View style={styles.container}>
+      <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <Text style={styles.title}>Settings</Text>
         </View>
+        <View style={styles.divider} />
+      </View>
+
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
         {isOffline && (
           <View style={styles.offlineBanner}>
-            <MaterialCommunityIcons name="wifi-off" size={16} color="#8B4513" />
-            <Text style={styles.offlineText}>You are offline. Profile editing is disabled.</Text>
+            <Text style={styles.offlineText}>
+              You are offline. Some features may be limited.
+            </Text>
           </View>
         )}
-
+        
         {successMessage ? (
           <Animated.View style={[styles.successMessage, { opacity: successOpacity }]}>
             <MaterialCommunityIcons name="check-circle" size={20} color="#fff" />
@@ -936,7 +941,7 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -945,29 +950,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#8B0000',
   },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: '4%',
+  headerContainer: {
+    width: '100%',
+    backgroundColor: '#8B0000',
   },
   header: {
-    paddingVertical: 16,
     paddingHorizontal: '4%',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingVertical: 16,
   },
   title: {
     fontSize: 24,
     fontWeight: '600',
     color: '#fff',
   },
+  divider: {
+    height: 1,
+    backgroundColor: '#fff',
+    width: '100%',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: '4%',
+    paddingTop: 24,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   profileImageSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   profileImageContainer: {
     position: 'relative',
@@ -1031,10 +1046,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   label: {
-    fontSize: 16,
-    color: '#fff',
-    marginBottom: 8,
-    opacity: 0.8,
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: 4,
   },
   value: {
     fontSize: 16,

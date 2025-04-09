@@ -27,7 +27,7 @@ interface CategoryData {
 }
 
 export default function BrowseScreen() {
-  const { isOffline } = useAuth();
+  const { isOffline, checkAuthStatus } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,6 +43,9 @@ export default function BrowseScreen() {
   const [isAnimatedValuesInitialized, setIsAnimatedValuesInitialized] = useState(false);
   const animatedHeights = useRef<Animated.Value[]>([]);
   const chevronRotations = useRef<Animated.Value[]>([]);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryTimeout, setRetryTimeout] = useState(0);
+  const retryTimerRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
     if (!isOffline) {
@@ -74,6 +77,15 @@ export default function BrowseScreen() {
 
     initializeFromParams();
   }, [params.category, params.brandId, params.searchQuery]);
+
+  useEffect(() => {
+    // Clear timeout when component unmounts
+    return () => {
+      if (retryTimerRef.current) {
+        clearInterval(retryTimerRef.current);
+      }
+    };
+  }, []);
 
   const fetchCategoriesAndBrands = async () => {
     try {
@@ -313,6 +325,32 @@ export default function BrowseScreen() {
     );
   };
 
+  const handleRetryConnection = async () => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+    setRetryTimeout(30);
+
+    try {
+      await checkAuthStatus();
+    } catch (error) {
+      console.error('Retry failed:', error);
+    }
+
+    // Start countdown
+    const countdownInterval = setInterval(() => {
+      setRetryTimeout((prev) => {
+        if (prev <= 1) {
+          clearInterval(countdownInterval);
+          setIsRetrying(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    retryTimerRef.current = countdownInterval;
+  };
+
   const renderContent = () => {
     console.log('renderContent called with state:', {
       isLoading,
@@ -326,11 +364,46 @@ export default function BrowseScreen() {
 
     if (isOffline) {
       return (
-        <View style={styles.emptyContainer}>
-          <MaterialCommunityIcons name="wifi-off" size={48} color="rgba(255, 255, 255, 0.5)" />
-          <Text style={styles.emptyText}>Product browsing is not available while offline</Text>
-          <Text style={styles.emptySubText}>Please check your internet connection and try again</Text>
-        </View>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.offlineContainer}>
+            <View style={styles.welcomeContainer}>
+              <MaterialCommunityIcons 
+                name="wifi-off" 
+                size={48} 
+                color="#fff" 
+                style={styles.offlineIcon} 
+              />
+              <Text style={styles.emptyText}>
+                Product browsing is unavailable while offline. Please check your internet connection and try again.
+              </Text>
+              <TouchableOpacity 
+                style={[
+                  styles.retryButton,
+                  isRetrying && styles.retryButtonDisabled
+                ]}
+                onPress={handleRetryConnection}
+                disabled={isRetrying}
+              >
+                <View style={styles.retryButtonContent}>
+                  <MaterialCommunityIcons 
+                    name="refresh" 
+                    size={20} 
+                    color="#fff" 
+                    style={[
+                      styles.retryIcon,
+                      isRetrying && styles.retryIconSpinning
+                    ]} 
+                  />
+                  <Text style={styles.retryButtonText}>
+                    {isRetrying 
+                      ? `Retry in ${retryTimeout}s` 
+                      : 'Retry Connection'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </SafeAreaView>
       );
     }
 
@@ -648,5 +721,50 @@ const styles = StyleSheet.create({
   },
   inputDisabled: {
     opacity: 0.5,
+  },
+  offlineContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 48,
+  },
+  welcomeContainer: {
+    padding: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    margin: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  offlineIcon: {
+    marginBottom: 16,
+    opacity: 0.7,
+    alignSelf: 'center',
+  },
+  retryButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 24,
+    alignSelf: 'center',
+  },
+  retryButtonDisabled: {
+    opacity: 0.5,
+  },
+  retryButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  retryIcon: {
+    marginRight: 8,
+  },
+  retryIconSpinning: {
+    transform: [{ rotate: '45deg' }],
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
 }); 
