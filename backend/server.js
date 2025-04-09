@@ -7,6 +7,7 @@ const path = require('path');
 const assistantRoutes = require('./routes/assistant');
 const authRoutes = require('./routes/auth');
 const commentRoutes = require('./routes/comments');
+const savedProductsRoutes = require('./routes/savedProducts');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -41,6 +42,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api', commentRoutes);
+app.use('/api/saved-products', savedProductsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

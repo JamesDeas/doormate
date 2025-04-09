@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Product, ProductCategory } from '@/types/product';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Ensure API_URL includes the /api suffix
 export const API_URL = process.env.EXPO_PUBLIC_API_URL 
@@ -221,5 +222,70 @@ export const assistantApi = {
       console.error('Chat API Error:', error);
       throw error;
     }
+  }
+};
+
+// Saved Products API
+export const savedProductsApi = {
+  // Get all saved products
+  getSavedProducts: async (): Promise<Product[]> => {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) throw new Error('Authentication required');
+    
+    const response = await fetch(`${API_URL}/saved-products`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Failed to fetch saved products');
+    return response.json();
+  },
+  
+  // Save a product for offline access
+  saveProduct: async (productId: string): Promise<void> => {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) throw new Error('Authentication required');
+    
+    const response = await fetch(`${API_URL}/saved-products/${productId}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Failed to save product');
+  },
+  
+  // Remove a saved product
+  removeSavedProduct: async (productId: string): Promise<void> => {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) throw new Error('Authentication required');
+    
+    const response = await fetch(`${API_URL}/saved-products/${productId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Failed to remove saved product');
+  },
+  
+  // Check if a product is saved
+  isProductSaved: async (productId: string): Promise<boolean> => {
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) throw new Error('Authentication required');
+    
+    const response = await fetch(`${API_URL}/saved-products/check/${productId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (!response.ok) throw new Error('Failed to check if product is saved');
+    
+    const data = await response.json();
+    return data.isSaved;
   }
 }; 

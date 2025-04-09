@@ -12,15 +12,18 @@ import {
   Animated,
   Image,
   SafeAreaView,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { authService, User } from '@/services/auth';
+import { savedProductsApi } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ProfileImage from '@/components/ProfileImage';
 import { debounce } from 'lodash';
+import type { Product } from '@/types/product';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -32,6 +35,8 @@ export default function SettingsScreen() {
   const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [usernameStatus, setUsernameStatus] = useState<'valid' | 'invalid' | 'checking' | ''>('');
+  const [savedProducts, setSavedProducts] = useState<Product[]>([]);
+  const [isLoadingSavedProducts, setIsLoadingSavedProducts] = useState(false);
   const successOpacity = useRef(new Animated.Value(0)).current;
   const isMounted = useRef(false);
   const [formData, setFormData] = useState({
@@ -51,6 +56,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     isMounted.current = true;
     loadUserProfile();
+    loadSavedProducts();
     return () => {
       isMounted.current = false;
     };
@@ -143,6 +149,71 @@ export default function SettingsScreen() {
       setIsLoading(false);
     }
   };
+
+  const loadSavedProducts = async () => {
+    if (!authService.isAuthenticated()) return;
+    
+    setIsLoadingSavedProducts(true);
+    try {
+      const products = await savedProductsApi.getSavedProducts();
+      if (isMounted.current) {
+        setSavedProducts(products);
+      }
+    } catch (error) {
+      console.error('Error loading saved products:', error);
+      if (isMounted.current) {
+        Alert.alert('Error', 'Failed to load saved products');
+      }
+    } finally {
+      if (isMounted.current) {
+        setIsLoadingSavedProducts(false);
+      }
+    }
+  };
+
+  const handleRemoveSavedProduct = async (productId: string) => {
+    try {
+      await savedProductsApi.removeSavedProduct(productId);
+      if (isMounted.current) {
+        setSavedProducts(prevProducts => 
+          prevProducts.filter(product => product._id !== productId)
+        );
+        showSuccess('Product removed from saved items');
+      }
+    } catch (error) {
+      console.error('Error removing saved product:', error);
+      if (isMounted.current) {
+        Alert.alert('Error', 'Failed to remove product from saved items');
+      }
+    }
+  };
+
+  const renderSavedProduct = ({ item }: { item: Product }) => (
+    <TouchableOpacity 
+      style={styles.savedProductItem}
+      onPress={() => router.push(`/product/${item._id}`)}
+    >
+      <Image 
+        source={{ uri: item.images?.main }} 
+        style={styles.savedProductImage}
+        resizeMode="cover"
+      />
+      <View style={styles.savedProductInfo}>
+        <Text style={styles.savedProductTitle} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <Text style={styles.savedProductModel} numberOfLines={1}>
+          {item.model}
+        </Text>
+      </View>
+      <TouchableOpacity 
+        style={styles.removeSavedButton}
+        onPress={() => handleRemoveSavedProduct(item._id)}
+      >
+        <MaterialCommunityIcons name="close" size={20} color="#666" />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
 
   const showSuccess = (message: string) => {
     setSuccessMessage(message);
@@ -426,23 +497,20 @@ export default function SettingsScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Settings</Text>
-        {!isEditing && (
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => setIsEditing(true)}
-          >
-            <MaterialCommunityIcons name="pencil" size={22} color="#fff" />
-          </TouchableOpacity>
-        )}
-      </View>
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <ScrollView style={styles.scrollView}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Settings</Text>
+          {!isEditing && (
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => setIsEditing(true)}
+            >
+              <MaterialCommunityIcons name="pencil" size={22} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
 
-      <ScrollView 
-        style={styles.content}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
-      >
         {successMessage ? (
           <Animated.View style={[styles.successMessage, { opacity: successOpacity }]}>
             <MaterialCommunityIcons name="check-circle" size={20} color="#fff" />
@@ -648,6 +716,26 @@ export default function SettingsScreen() {
           )}
         </View>
 
+        {/* Saved Products Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Saved Products</Text>
+          {isLoadingSavedProducts ? (
+            <ActivityIndicator style={styles.loadingIndicator} />
+          ) : savedProducts.length > 0 ? (
+            <FlatList
+              data={savedProducts}
+              renderItem={renderSavedProduct}
+              keyExtractor={item => item._id}
+              scrollEnabled={false}
+              ItemSeparatorComponent={() => <View style={styles.separator} />}
+            />
+          ) : (
+            <Text style={styles.emptyText}>
+              No saved products yet. Save products for offline access from the product page.
+            </Text>
+          )}
+        </View>
+
         <TouchableOpacity
           style={styles.logoutButton}
           onPress={performLogout}
@@ -656,7 +744,7 @@ export default function SettingsScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -677,7 +765,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     justifyContent: 'space-between',
   },
-  content: {
+  scrollView: {
     flex: 1,
     padding: 16,
   },
@@ -868,5 +956,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FF6B6B',
-  }
+  },
+  savedProductItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  savedProductImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 4,
+  },
+  savedProductInfo: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  savedProductTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  savedProductModel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  removeSavedButton: {
+    padding: 8,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 16,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  loadingIndicator: {
+    marginVertical: 20,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#eee',
+    marginVertical: 8,
+  },
 }); 

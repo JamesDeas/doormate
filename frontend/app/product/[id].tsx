@@ -13,14 +13,16 @@ import {
   Dimensions,
   FlatList,
   Animated,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Product } from '@/types/product';
-import { productApi } from '@/services/api';
+import { productApi, savedProductsApi } from '@/services/api';
 import Discussion from '@/components/Discussion';
+import { authService } from '@/services/auth';
 
 // Get base URL for images by removing '/api' from the API_URL
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/api$/, '');
@@ -44,7 +46,17 @@ const getFullImageUrl = (imagePath: string) => {
 // Define tab types
 type TabType = 'description' | 'manuals' | 'details' | 'discussion';
 
-const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
+const Header = ({ 
+  title, 
+  onBack, 
+  isSaved, 
+  onToggleSave 
+}: { 
+  title: string; 
+  onBack: () => void;
+  isSaved: boolean;
+  onToggleSave: () => void;
+}) => (
   <SafeAreaView style={styles.headerContainer}>
     <View style={styles.header}>
       <TouchableOpacity 
@@ -55,6 +67,17 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
         <MaterialCommunityIcons name="arrow-left" size={24} color="#fff" />
       </TouchableOpacity>
       <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+      <TouchableOpacity 
+        onPress={onToggleSave}
+        style={styles.saveButton}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <MaterialCommunityIcons 
+          name={isSaved ? "bookmark" : "bookmark-outline"} 
+          size={24} 
+          color="#fff" 
+        />
+      </TouchableOpacity>
     </View>
   </SafeAreaView>
 );
@@ -228,11 +251,61 @@ export default function ProductDetailsScreen() {
   const [downloadProgress, setDownloadProgress] = useState<{ [key: string]: number }>({});
   const [downloadedManuals, setDownloadedManuals] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('description');
+  const [isSaved, setIsSaved] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     loadProduct();
     loadDownloadedManuals();
+    checkAuthStatus();
   }, [id]);
+
+  const checkAuthStatus = async () => {
+    try {
+      const isAuth = authService.isAuthenticated();
+      setIsAuthenticated(isAuth);
+      
+      if (isAuth && id) {
+        try {
+          const saved = await savedProductsApi.isProductSaved(id as string);
+          setIsSaved(saved);
+        } catch (error) {
+          console.error('Error checking if product is saved:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+    }
+  };
+
+  const toggleSaveProduct = async () => {
+    if (!isAuthenticated) {
+      Alert.alert(
+        'Authentication Required',
+        'Please log in to save products for offline access.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log In', onPress: () => router.push('/auth/login') }
+        ]
+      );
+      return;
+    }
+
+    if (!product) return;
+
+    try {
+      if (isSaved) {
+        await savedProductsApi.removeSavedProduct(product._id);
+        setIsSaved(false);
+      } else {
+        await savedProductsApi.saveProduct(product._id);
+        setIsSaved(true);
+      }
+    } catch (error) {
+      console.error('Error toggling saved product:', error);
+      Alert.alert('Error', 'Failed to update saved products. Please try again.');
+    }
+  };
 
   const loadDownloadedManuals = async () => {
     try {
@@ -566,6 +639,8 @@ export default function ProductDetailsScreen() {
       <Header 
         title={product.title} 
         onBack={() => router.push("/(tabs)/browse")} 
+        isSaved={isSaved}
+        onToggleSave={toggleSaveProduct}
       />
       <ScrollView style={styles.scrollView}>
         <View style={styles.content}>
@@ -880,5 +955,9 @@ const styles = StyleSheet.create({
   activeTabLabel: {
     color: '#fff',
     fontWeight: '600',
+  },
+  saveButton: {
+    padding: 8,
+    marginRight: -8,
   },
 }); 
