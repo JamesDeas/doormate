@@ -15,6 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import ProfileImage from './ProfileImage';
 import { authService, User } from '@/services/auth';
 import { API_URL } from '@/services/api';
+import { localDatabase } from '@/services/localDatabase';
 
 interface Comment {
   _id: string;
@@ -38,9 +39,10 @@ interface Comment {
 
 interface DiscussionProps {
   productId: string;
+  isOffline: boolean;
 }
 
-const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
+const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
   const [comments, setComments] = useState<Comment[]>([]);
   const [replies, setReplies] = useState<{ [key: string]: Comment[] }>({});
   const [newComment, setNewComment] = useState('');
@@ -63,6 +65,17 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
 
   const loadCurrentUser = async () => {
     try {
+      // Check if offline first
+      const online = await localDatabase.isOnline();
+      if (!online) {
+        // Try to get user from local storage
+        const user = await localDatabase.getUserProfile();
+        if (user) {
+          setCurrentUser(user);
+        }
+        return;
+      }
+
       console.log('Loading current user');
       const user = await authService.getCurrentUser();
       console.log('Current user loaded:', user);
@@ -76,6 +89,16 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
   const loadComments = async () => {
     try {
       setIsLoading(true);
+      
+      // Check if offline first
+      const online = await localDatabase.isOnline();
+      if (!online) {
+        // When offline, don't try to load comments
+        setComments([]);
+        setIsLoading(false);
+        return;
+      }
+
       console.log('Loading comments for product:', productId);
       console.log('Using API URL:', API_URL);
       console.log('Full comments URL:', `${API_URL}/products/${productId}/comments`);
@@ -94,7 +117,10 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
       setComments(data);
     } catch (error) {
       console.error('Error loading comments:', error);
-      Alert.alert('Error', 'Failed to load comments. Please try again later.');
+      // Don't show error alert when offline
+      if (await localDatabase.isOnline()) {
+        Alert.alert('Error', 'Failed to load comments. Please try again later.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -605,37 +631,46 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Discussion</Text>
       
-      <View style={styles.inputWrapper}>
-        <TextInput
-          style={styles.input}
-          placeholder="Share your experience with this product..."
-          placeholderTextColor="rgba(255, 255, 255, 0.5)"
-          value={newComment}
-          onChangeText={setNewComment}
-          multiline={false}
-          maxLength={500}
-          onSubmitEditing={handleSubmitComment}
-        />
-        <TouchableOpacity
-          style={[
-            styles.submitButton,
-            (!newComment.trim() || isSubmitting) && styles.submitButtonDisabled
-          ]}
-          onPress={handleSubmitComment}
-          disabled={!newComment.trim() || isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <MaterialCommunityIcons name="send" size={24} color="#fff" />
-          )}
-        </TouchableOpacity>
-      </View>
+        <View style={styles.inputWrapper}>
+          <TextInput
+            style={[
+              styles.input,
+              isOffline && styles.inputDisabled
+            ]}
+            placeholder="Share your experience with this product..."
+            placeholderTextColor="rgba(255, 255, 255, 0.5)"
+            value={newComment}
+            onChangeText={setNewComment}
+            multiline={false}
+            maxLength={500}
+            onSubmitEditing={handleSubmitComment}
+            editable={!isOffline}
+          />
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              (!newComment.trim() || isSubmitting || isOffline) && styles.submitButtonDisabled
+            ]}
+            onPress={handleSubmitComment}
+            disabled={!newComment.trim() || isSubmitting || isOffline}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="send" size={24} color="#fff" />
+            )}
+          </TouchableOpacity>
+        </View>
         
         <View style={styles.discussionArea}>
           {isLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#8B0000" />
+            </View>
+          ) : isOffline ? (
+            <View style={styles.emptyContainer}>
+              <MaterialCommunityIcons name="cloud-off-outline" size={48} color="rgba(255, 255, 255, 0.5)" />
+              <Text style={styles.emptyText}>Comments are not available while offline. Please check back when you're connected to the internet.</Text>
             </View>
           ) : comments.length > 0 ? (
             <View style={styles.commentsList}>
@@ -643,8 +678,8 @@ const Discussion: React.FC<DiscussionProps> = ({ productId }) => {
             </View>
           ) : (
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="comment-outline" size={48} color="rgba(255, 255, 255, 0.5)" />
-              <Text style={styles.emptyText}>No comments yet. Be the first to share your experience!</Text>
+              <Text style={styles.emptyText}>No comments yet</Text>
+              <Text style={styles.emptySubText}>Be the first to start the discussion</Text>
             </View>
           )}
         </View>
@@ -998,6 +1033,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     opacity: 0.7,
     fontStyle: 'italic',
+  },
+  inputDisabled: {
+    opacity: 0.5,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 22,
   },
 });
 

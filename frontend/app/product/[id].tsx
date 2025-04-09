@@ -279,15 +279,38 @@ export default function ProductDetailsScreen() {
 
   const checkAuthStatus = async () => {
     try {
+      // First check if we're offline
+      const online = await localDatabase.isOnline();
+      setIsOffline(!online);
+      
+      // Get the token
       const token = await AsyncStorage.getItem('auth_token');
       setIsAuthenticated(!!token);
       
+      // If we're offline and have a token, skip the server validation
+      if (!online && token) {
+        // Try to get saved status from local database
+        try {
+          const offlineProduct = await localDatabase.getOfflineProduct(id as string);
+          setIsSaved(!!offlineProduct);
+        } catch (err) {
+          console.log('Error checking offline saved status:', err);
+          setIsSaved(false);
+        }
+        return;
+      }
+      
+      // If online, proceed with normal validation
       if (token) {
         const saved = await savedProductsApi.isProductSaved(id as string);
         setIsSaved(saved);
       }
     } catch (err) {
       console.error('Error checking auth status:', err);
+      // If there's an error and we're offline, don't clear the auth state
+      if (await localDatabase.isOnline()) {
+        setIsAuthenticated(false);
+      }
     }
   };
 
@@ -614,7 +637,12 @@ export default function ProductDetailsScreen() {
           </>
         );
       case 'discussion':
-        return <Discussion productId={product?._id || ''} />;
+        return (
+          <Discussion 
+            productId={product?._id || ''} 
+            isOffline={isOffline}
+          />
+        );
       default:
         return null;
     }

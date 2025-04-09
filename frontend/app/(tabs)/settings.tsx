@@ -78,6 +78,9 @@ export default function SettingsScreen() {
     newPassword: '',
     confirmPassword: '',
   });
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [usernameValid, setUsernameValid] = useState<boolean>(true);
+  const usernameCheckTimeout = useRef<NodeJS.Timeout>();
 
   // Set mounted ref
   useEffect(() => {
@@ -89,44 +92,47 @@ export default function SettingsScreen() {
     };
   }, []);
 
-  // Debounced function to check username availability
-  const checkUsername = debounce(async (username: string) => {
-    if (!username || username.trim() === '') {
-      setUsernameStatus('invalid');
+  const validateUsername = (username: string) => {
+    if (!username) return false;
+    return /^[a-zA-Z0-9_]{3,20}$/.test(username);
+  };
+
+  const checkUsernameAvailability = async (username: string) => {
+    if (!username || username === user?.username) {
+      setUsernameAvailable(null);
       return;
     }
     
-    // If username hasn't changed, it's valid
-    if (user && username === user.username) {
-      setUsernameStatus('valid');
+    if (!validateUsername(username)) {
+      setUsernameValid(false);
+      setUsernameAvailable(null);
       return;
     }
     
-    // Username validation - alphanumeric and underscore only
-    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-      setUsernameStatus('invalid');
-      return;
-    }
-    
-    // Username must be between 3 and 20 characters
-    if (username.length < 3 || username.length > 20) {
-      setUsernameStatus('invalid');
-      return;
-    }
-    
-    setUsernameStatus('checking');
+    setUsernameValid(true);
     try {
-      const isAvailable = await authService.checkUsernameAvailability(username);
-      if (isMounted.current) {
-        setUsernameStatus(isAvailable ? 'valid' : 'invalid');
-      }
+      const available = await authService.checkUsernameAvailability(username);
+      setUsernameAvailable(available);
     } catch (error) {
-      console.error('Error checking username:', error);
-      if (isMounted.current) {
-        setUsernameStatus('');
-      }
+      console.error('Error checking username availability:', error);
+      setUsernameAvailable(null);
     }
-  }, 500);
+  };
+
+  const handleUsernameChange = (text: string) => {
+    setFormData(prev => ({ ...prev, username: text }));
+    setUsernameValid(validateUsername(text));
+    
+    // Clear any existing timeout
+    if (usernameCheckTimeout.current) {
+      clearTimeout(usernameCheckTimeout.current);
+    }
+    
+    // Set a new timeout to check availability
+    usernameCheckTimeout.current = setTimeout(() => {
+      checkUsernameAvailability(text);
+    }, 500);
+  };
 
   // Handle success message animation
   useEffect(() => {
@@ -439,6 +445,38 @@ export default function SettingsScreen() {
     }
   };
 
+  const handlePasswordChange = async () => {
+    if (
+      !passwordData.currentPassword ||
+      !passwordData.newPassword ||
+      !passwordData.confirmPassword ||
+      passwordData.newPassword !== passwordData.confirmPassword
+    ) {
+      return;
+    }
+
+    setIsSubmittingPassword(true);
+    try {
+      await authService.changePassword({
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword
+      });
+
+      // Clear password fields
+      setPasswordData({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      });
+      setShowPasswordFields(false);
+      showSuccess('Password updated successfully');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update password. Please check your current password and try again.');
+    } finally {
+      setIsSubmittingPassword(false);
+    }
+  };
+
   // Helper function to resize base64 image for better performance (web only)
   const resizeBase64Image = (base64Str: string): Promise<string> => {
     // Only implement for web platform
@@ -597,70 +635,78 @@ export default function SettingsScreen() {
     }
   };
 
-  const renderForm = () => {
-    return (
-      <View style={styles.form}>
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>First Name</Text>
-          <TextInput
-            style={[styles.input, isOffline && styles.inputDisabled]}
-            value={formData.firstName}
-            onChangeText={(text) => setFormData({ ...formData, firstName: text })}
-            placeholder="Enter your first name"
-            placeholderTextColor="#666"
-            editable={isEditing && !isOffline}
-          />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Last Name</Text>
-          <TextInput
-            style={[styles.input, isOffline && styles.inputDisabled]}
-            value={formData.lastName}
-            onChangeText={(text) => setFormData({ ...formData, lastName: text })}
-            placeholder="Enter your last name"
-            placeholderTextColor="#666"
-            editable={isEditing && !isOffline}
-          />
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Username</Text>
-          <TextInput
-            style={[styles.input, isOffline && styles.inputDisabled]}
-            value={formData.username}
-            onChangeText={(text) => setFormData({ ...formData, username: text })}
-            placeholder="Choose a username"
-            placeholderTextColor="#666"
-            editable={isEditing && !isOffline}
-          />
-          {usernameStatus === 'checking' && (
-            <ActivityIndicator size="small" color="#007AFF" style={styles.usernameStatus} />
-          )}
-          {usernameStatus === 'valid' && (
-            <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" style={styles.usernameStatus} />
-          )}
-          {usernameStatus === 'invalid' && (
-            <MaterialCommunityIcons name="close-circle" size={20} color="#F44336" style={styles.usernameStatus} />
-          )}
-        </View>
-
-        <View style={styles.formGroup}>
-          <Text style={styles.label}>Company</Text>
-          <TextInput
-            style={[styles.input, isOffline && styles.inputDisabled]}
-            value={formData.company}
-            onChangeText={(text) => setFormData({ ...formData, company: text })}
-            placeholder="Enter your company name (optional)"
-            placeholderTextColor="#666"
-            editable={isEditing && !isOffline}
-          />
-        </View>
-
-        {/* ... rest of the form ... */}
+  const renderForm = () => (
+    <View style={styles.form}>
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>First Name</Text>
+        <TextInput
+          style={styles.input}
+          value={formData.firstName}
+          onChangeText={(text) => setFormData({ ...formData, firstName: text })}
+          placeholder="First Name"
+          placeholderTextColor="rgba(0, 0, 0, 0.5)"
+        />
       </View>
-    );
-  };
+
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>Last Name</Text>
+        <TextInput
+          style={styles.input}
+          value={formData.lastName}
+          onChangeText={(text) => setFormData({ ...formData, lastName: text })}
+          placeholder="Last Name"
+          placeholderTextColor="rgba(0, 0, 0, 0.5)"
+        />
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>Username</Text>
+        <View style={styles.inputContainer}>
+          <TextInput
+            style={[
+              styles.input,
+              !usernameValid && styles.inputError
+            ]}
+            value={formData.username}
+            onChangeText={handleUsernameChange}
+            placeholder="Username"
+            placeholderTextColor="rgba(0, 0, 0, 0.5)"
+          />
+          {formData.username && (
+            <View style={styles.validationIconContainer}>
+              {usernameValid && usernameAvailable === true && (
+                <MaterialCommunityIcons name="check-circle" size={24} color="#4CAF50" />
+              )}
+              {(!usernameValid || usernameAvailable === false) && (
+                <MaterialCommunityIcons name="close-circle" size={24} color="#F44336" />
+              )}
+            </View>
+          )}
+        </View>
+        {formData.username && !usernameValid && (
+          <Text style={styles.errorText}>
+            Username must be 3-20 characters and contain only letters, numbers, and underscores
+          </Text>
+        )}
+        {usernameValid && usernameAvailable === false && (
+          <Text style={styles.errorText}>
+            This username is already taken
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>Company</Text>
+        <TextInput
+          style={styles.input}
+          value={formData.company}
+          onChangeText={(text) => setFormData({ ...formData, company: text })}
+          placeholder="Company (Optional)"
+          placeholderTextColor="rgba(0, 0, 0, 0.5)"
+        />
+      </View>
+    </View>
+  );
 
   if (isLoading) {
     return (
@@ -673,23 +719,17 @@ export default function SettingsScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+    <SafeAreaView style={[
+      styles.container,
+      isOffline && { paddingTop: 36 }
+    ]}>
       <ScrollView style={styles.scrollView}>
         <View style={styles.header}>
           <Text style={styles.title}>Settings</Text>
-          {!isEditing && !isOffline && (
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() => setIsEditing(true)}
-            >
-              <MaterialCommunityIcons name="pencil" size={22} color="#fff" />
-            </TouchableOpacity>
-          )}
         </View>
-
         {isOffline && (
           <View style={styles.offlineBanner}>
-            <MaterialCommunityIcons name="wifi-off" size={20} color="#8B4513" />
+            <MaterialCommunityIcons name="wifi-off" size={16} color="#8B4513" />
             <Text style={styles.offlineText}>You are offline. Profile editing is disabled.</Text>
           </View>
         )}
@@ -734,22 +774,125 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Profile Information</Text>
+            {!isOffline && (
+              <TouchableOpacity 
+                onPress={() => setIsEditing(!isEditing)}
+                style={styles.editButton}
+              >
+                <MaterialCommunityIcons 
+                  name={isEditing ? "close" : "pencil"} 
+                  size={24} 
+                  color="#fff" 
+                />
+              </TouchableOpacity>
+            )}
           </View>
-          
+
           {isEditing ? (
             renderForm()
           ) : (
             <View style={styles.profileInfo}>
               <Text style={styles.label}>Name</Text>
               <Text style={styles.value}>{user?.firstName} {user?.lastName}</Text>
+              
               <Text style={styles.label}>Email</Text>
               <Text style={styles.value}>{user?.email}</Text>
+              
+              <Text style={styles.label}>Username</Text>
+              <Text style={styles.value}>@{user?.username}</Text>
+              
               {user?.company && (
                 <>
                   <Text style={styles.label}>Company</Text>
                   <Text style={styles.value}>{user.company}</Text>
                 </>
               )}
+            </View>
+          )}
+
+          {isEditing && !isOffline && (
+            <View style={styles.passwordSection}>
+              <TouchableOpacity 
+                onPress={() => setShowPasswordFields(!showPasswordFields)}
+                style={styles.passwordToggle}
+              >
+                <Text style={styles.passwordToggleText}>
+                  {showPasswordFields ? 'Hide Password Change' : 'Change Password'}
+                </Text>
+                <MaterialCommunityIcons 
+                  name={showPasswordFields ? "chevron-up" : "chevron-down"} 
+                  size={24} 
+                  color="#fff" 
+                />
+              </TouchableOpacity>
+
+              {showPasswordFields && (
+                <View style={styles.passwordFields}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="Current Password"
+                    placeholderTextColor="rgba(0, 0, 0, 0.5)"
+                    secureTextEntry
+                    value={passwordData.currentPassword}
+                    onChangeText={(text) => setPasswordData(prev => ({
+                      ...prev,
+                      currentPassword: text
+                    }))}
+                  />
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="New Password"
+                    placeholderTextColor="rgba(0, 0, 0, 0.5)"
+                    secureTextEntry
+                    value={passwordData.newPassword}
+                    onChangeText={(text) => setPasswordData(prev => ({
+                      ...prev,
+                      newPassword: text
+                    }))}
+                  />
+                  <TextInput
+                    style={styles.passwordInput}
+                    placeholder="Confirm New Password"
+                    placeholderTextColor="rgba(0, 0, 0, 0.5)"
+                    secureTextEntry
+                    value={passwordData.confirmPassword}
+                    onChangeText={(text) => setPasswordData(prev => ({
+                      ...prev,
+                      confirmPassword: text
+                    }))}
+                  />
+                </View>
+              )}
+            </View>
+          )}
+
+          {isEditing && (
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity 
+                style={[styles.button, styles.cancelButton]} 
+                onPress={() => {
+                  setIsEditing(false);
+                  setShowPasswordFields(false);
+                  setPasswordData({
+                    currentPassword: '',
+                    newPassword: '',
+                    confirmPassword: '',
+                  });
+                }}
+              >
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.button, styles.saveButton]} 
+                onPress={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -802,21 +945,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#8B0000',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: '4%',
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#fff',
-    backgroundColor: '#8B0000',
-    position: 'relative',
-    justifyContent: 'space-between',
-  },
   scrollView: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: '4%',
+  },
+  header: {
+    paddingVertical: 16,
+    paddingHorizontal: '4%',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   loadingContainer: {
     flex: 1,
@@ -825,7 +962,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#fff',
   },
   profileImageSection: {
@@ -875,48 +1012,45 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: '#fff',
   },
   editButton: {
-    padding: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 20,
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 4,
   },
   profileInfo: {
-    marginBottom: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 16,
+    marginTop: 8,
   },
   label: {
-    fontSize: 14,
-    color: '#ccc',
-    marginBottom: 5,
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 8,
+    opacity: 0.8,
   },
   value: {
     fontSize: 16,
     color: '#fff',
-    marginBottom: 15,
+    marginBottom: 8,
   },
   form: {
-    gap: 15,
+    gap: 16,
   },
   input: {
     backgroundColor: '#fff',
-    padding: 12,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    padding: 16,
     fontSize: 16,
-    color: '#333',
+    color: '#000',
+    width: '100%',
   },
   validInput: {
     borderWidth: 1,
@@ -943,51 +1077,57 @@ const styles = StyleSheet.create({
     marginTop: -10,
     marginBottom: 10,
   },
-  buttonRow: {
+  buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 16,
+    gap: 12,
   },
   button: {
     flex: 1,
-    padding: 12,
+    paddingVertical: 16,
     borderRadius: 8,
     alignItems: 'center',
-    marginHorizontal: 5,
+    justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderWidth: 1,
-    borderColor: '#ddd',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   saveButton: {
     backgroundColor: '#4A0404',
   },
   buttonText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
   },
-  saveButtonText: {
-    color: '#fff',
+  passwordSection: {
+    marginTop: 8,
   },
-  togglePasswordButton: {
+  passwordToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
-    marginVertical: 5,
+    marginTop: 16,
   },
-  togglePasswordText: {
+  passwordToggleText: {
     color: '#fff',
     fontSize: 16,
-    marginLeft: 10,
     fontWeight: '500',
   },
   passwordFields: {
-    marginTop: 5,
-    gap: 15,
+    marginTop: 16,
+    gap: 16,
+  },
+  passwordInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    fontSize: 16,
+    color: '#000',
   },
   logoutButton: {
     flexDirection: 'row',
@@ -1085,25 +1225,40 @@ const styles = StyleSheet.create({
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    backgroundColor: 'rgba(139, 69, 19, 0.2)',
-    borderRadius: 8,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 69, 19, 0.3)',
+    backgroundColor: 'rgba(255, 228, 181, 0.2)',
+    padding: 12,
+    marginBottom: 8,
   },
   offlineText: {
-    marginLeft: 10,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#8B4513',
+    color: '#FFE4B5',
+    marginLeft: 8,
+    fontSize: 14,
   },
   inputDisabled: {
     opacity: 0.5,
     backgroundColor: '#f5f5f5',
   },
   formGroup: {
-    marginBottom: 15,
     width: '100%',
+  },
+  inputContainer: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  inputError: {
+    borderWidth: 1,
+    borderColor: '#F44336',
+  },
+  validationIconContainer: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 1,
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 14,
+    marginTop: 4,
   },
 }); 

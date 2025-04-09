@@ -5,6 +5,7 @@ import { authService } from '@/services/auth';
 import { View, AppState, AppStateStatus, Alert, Text, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { localDatabase } from '@/services/localDatabase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -31,11 +32,18 @@ export const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 // Offline indicator component
-const OfflineIndicator = () => (
-  <View style={styles.offlineContainer}>
-    <Text style={styles.offlineText}>You are offline. Some features may be limited.</Text>
-  </View>
-);
+const OfflineIndicator = () => {
+  const insets = useSafeAreaInsets();
+  
+  return (
+    <View style={[
+      styles.offlineContainer,
+      { paddingTop: insets.top }
+    ]}>
+      <Text style={styles.offlineText}>You are offline. Some features may be limited.</Text>
+    </View>
+  );
+};
 
 export default function RootLayout() {
   const segments = useSegments();
@@ -224,10 +232,7 @@ const styles = StyleSheet.create({
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+    width: '100%',
     zIndex: 1000,
   },
   offlineText: {

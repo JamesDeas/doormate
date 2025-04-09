@@ -10,10 +10,12 @@ import {
   Platform,
   FlatList,
   Animated,
+  SafeAreaView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { ProductCategory } from '@/types/product';
+import { useAuth } from '@/app/_layout';
 
 interface BrandCard {
   id: string;
@@ -86,6 +88,7 @@ const brandCards: Partial<Record<ProductCategory, BrandCard[]>> = {
 };
 
 export default function HomeScreen() {
+  const { isOffline } = useAuth();
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const searchAnimation = useRef(new Animated.Value(0)).current;
@@ -150,7 +153,10 @@ export default function HomeScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[
+      styles.container,
+      isOffline && { paddingTop: 36 }
+    ]}>
       <View style={styles.header}>
         <Animated.View style={{
           opacity: searchAnimation.interpolate({
@@ -236,7 +242,7 @@ export default function HomeScreen() {
           renderCategorySection(category as ProductCategory)
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -249,8 +255,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: '4%',
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#fff',
     backgroundColor: '#8B0000',
@@ -266,7 +271,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     height: 40,
-    top: Platform.OS === 'ios' ? 65 : 25,
+    top: 20,
     zIndex: 1,
   },
   searchInput: {

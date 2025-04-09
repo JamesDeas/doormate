@@ -15,6 +15,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useDebouncedCallback } from 'use-debounce';
 import type { Product, ProductCategory } from '@/types/product';
 import { productApi } from '@/services/api';
+import { useAuth } from '@/app/_layout';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface CategoryData {
   category: ProductCategory;
@@ -25,6 +27,8 @@ interface CategoryData {
 }
 
 export default function BrowseScreen() {
+  const { isOffline } = useAuth();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -41,8 +45,10 @@ export default function BrowseScreen() {
   const chevronRotations = useRef<Animated.Value[]>([]);
 
   useEffect(() => {
-    fetchCategoriesAndBrands();
-  }, []);
+    if (!isOffline) {
+      fetchCategoriesAndBrands();
+    }
+  }, [isOffline]);
 
   useEffect(() => {
     if (categories.length > 0) {
@@ -311,11 +317,22 @@ export default function BrowseScreen() {
     console.log('renderContent called with state:', {
       isLoading,
       error,
+      isOffline,
       searchQuery: searchQuery.length,
       selectedCategory,
       selectedBrand,
       filteredProducts: filteredProducts.length
     });
+
+    if (isOffline) {
+      return (
+        <View style={styles.emptyContainer}>
+          <MaterialCommunityIcons name="wifi-off" size={48} color="rgba(255, 255, 255, 0.5)" />
+          <Text style={styles.emptyText}>Product browsing is not available while offline</Text>
+          <Text style={styles.emptySubText}>Please check your internet connection and try again</Text>
+        </View>
+      );
+    }
 
     if (isLoading) {
       console.log('Showing loading state');
@@ -415,21 +432,25 @@ export default function BrowseScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[
+      styles.container,
+      isOffline && { paddingTop: 36 }
+    ]}>
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
           <MaterialCommunityIcons name="magnify" size={24} color="#666666" />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, isOffline && styles.inputDisabled]}
             placeholder="Search by product name or brand..."
             value={searchQuery}
             onChangeText={handleSearch}
             placeholderTextColor="#666666"
             autoCapitalize="none"
             autoCorrect={false}
+            editable={!isOffline}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => handleSearch('')}>
+            <TouchableOpacity onPress={() => handleSearch('')} disabled={isOffline}>
               <MaterialCommunityIcons name="close" size={24} color="#666666" />
             </TouchableOpacity>
           )}
@@ -604,5 +625,28 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 20,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 22,
+  },
+  emptySubText: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 22,
+  },
+  inputDisabled: {
+    opacity: 0.5,
   },
 }); 
