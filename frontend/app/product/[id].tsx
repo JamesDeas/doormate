@@ -18,12 +18,14 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Product } from '@/types/product';
 import { productApi, savedProductsApi, API_URL } from '@/services/api';
 import Discussion from '@/components/Discussion';
 import { authService } from '@/services/auth';
 import { localDatabase } from '@/services/localDatabase';
+import PDFViewer from '@/components/PDFViewer';
 
 // Get base URL for images by removing '/api' from the API_URL
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').replace(/\/api$/, '');
@@ -31,7 +33,12 @@ const BASE_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5001').re
 // Debug URL construction
 const getFullUrl = (path: string) => {
   if (!path) return '';
+  
+  // If it's already a full URL, return it as is
   if (path.startsWith('http')) return path;
+  
+  // If it's a local file path, return it as is
+  if (path.startsWith('file://')) return path;
   
   // Remove any leading slash to avoid double slashes
   const cleanPath = path.startsWith('/') ? path.slice(1) : path;
@@ -39,13 +46,13 @@ const getFullUrl = (path: string) => {
   // If the path is for an image or manual, use the BASE_URL
   if (cleanPath.startsWith('images/') || cleanPath.startsWith('manuals/')) {
     const fullUrl = `${BASE_URL}/${cleanPath}`;
-    console.log('Constructed URL:', fullUrl); // Add debugging
+    console.log('Constructed URL for image/manual:', fullUrl);
     return fullUrl;
   }
   
   // For API endpoints, use the API_URL
   const fullUrl = `${API_URL}/${cleanPath}`;
-  console.log('Constructed API URL:', fullUrl); // Add debugging
+  console.log('Constructed API URL:', fullUrl);
   return fullUrl;
 };
 
@@ -264,6 +271,7 @@ export default function ProductDetailsScreen() {
   const [isSaved, setIsSaved] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [selectedPdfUrl, setSelectedPdfUrl] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuthStatus();
@@ -376,37 +384,72 @@ export default function ProductDetailsScreen() {
 
   const handleViewManual = async (manual: { url: string; title: string }) => {
     try {
-      if (Platform.OS === 'web') {
-        // For web platform, ensure we're using the correct base URL
-        const fullUrl = getFullUrl(manual.url);
-        console.log('Opening manual URL:', fullUrl);
-        window.open(fullUrl, '_blank');
-        return;
-      }
-
-      // Rest of the mobile platform code...
-      const urlParts = manual.url.split('/');
-      const subDir = urlParts[urlParts.length - 2];
+      console.log('Manual URL before processing:', manual.url);
       
-      const downloadedPath = `${FileSystem.documentDirectory}manuals/${subDir}/${manual.title.replace(/\s+/g, '_')}.pdf`;
-      const fileInfo = await FileSystem.getInfoAsync(downloadedPath);
-      
-      if (fileInfo.exists) {
+      // Check if this is a local file path
+      if (manual.url.startsWith('file://')) {
+        console.log('Local file detected, using directly:', manual.url);
+        
+        // For iOS, we need to check if the file exists
         if (Platform.OS === 'ios') {
-          await Linking.openURL(`file://${downloadedPath}`);
-        } else {
-          await FileSystem.getContentUriAsync(downloadedPath).then(uri => {
-            Linking.openURL(uri);
-          });
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(manual.url);
+            console.log('File info for manual:', fileInfo);
+            
+            if (!fileInfo.exists) {
+              console.error('File does not exist:', manual.url);
+              Alert.alert('Error', 'PDF file not found');
+              return;
+            }
+          } catch (error) {
+            console.error('Error checking file existence:', error);
+            Alert.alert('Error', 'Failed to access PDF file');
+            return;
+          }
         }
+        
+        // Set the PDF URL to display in the modal
+        setSelectedPdfUrl(manual.url);
         return;
       }
-
-      // If not downloaded, open the URL directly
-      await Linking.openURL(getFullUrl(manual.url));
+      
+      // For remote URLs, use getFullUrl
+      const fullUrl = getFullUrl(manual.url);
+      console.log('Full URL after processing:', fullUrl);
+      
+      if (Platform.OS === 'web') {
+        console.log('Setting PDF URL for web platform:', fullUrl);
+        setSelectedPdfUrl(fullUrl);
+      } else {
+        // For mobile, check if it's downloaded first
+        const urlParts = manual.url.split('/');
+        const subDir = urlParts[urlParts.length - 2];
+        const downloadedPath = `${FileSystem.documentDirectory}manuals/${subDir}/${manual.title.replace(/\s+/g, '_')}.pdf`;
+        console.log('Checking for downloaded manual at:', downloadedPath);
+        
+        const fileInfo = await FileSystem.getInfoAsync(downloadedPath);
+        console.log('File info:', fileInfo);
+        
+        if (fileInfo.exists) {
+          // If downloaded, use the local file
+          if (Platform.OS === 'ios') {
+            const iosPath = `file://${downloadedPath}`;
+            console.log('Using iOS local file path:', iosPath);
+            setSelectedPdfUrl(iosPath);
+          } else {
+            const uri = await FileSystem.getContentUriAsync(downloadedPath);
+            console.log('Using Android content URI:', uri);
+            setSelectedPdfUrl(uri);
+          }
+        } else {
+          // If not downloaded, use the remote URL
+          console.log('Using remote URL for mobile:', fullUrl);
+          setSelectedPdfUrl(fullUrl);
+        }
+      }
     } catch (error) {
       console.error('Error viewing manual:', error);
-      alert('Failed to open manual. Please try again.');
+      Alert.alert('Error', 'Failed to open manual. Please try again.');
     }
   };
 
@@ -432,22 +475,35 @@ export default function ProductDetailsScreen() {
         return;
       }
 
-      // Rest of the mobile platform code...
-      const urlParts = manual.url.split('/');
-      const subDir = urlParts[urlParts.length - 2];
-      
-      const downloadedPath = `${FileSystem.documentDirectory}manuals/${subDir}/${manual.title.replace(/\s+/g, '_')}.pdf`;
-      
-      // Create manuals/subDir directory if it doesn't exist
-      const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.documentDirectory}manuals/${subDir}`);
+      // For mobile platforms
+      const fileName = manual.title.replace(/\s+/g, '_') + '.pdf';
+      const destinationUri = `${FileSystem.documentDirectory}manuals/${fileName}`;
+
+      // Create manuals directory if it doesn't exist
+      const dirInfo = await FileSystem.getInfoAsync(`${FileSystem.documentDirectory}manuals`);
       if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(`${FileSystem.documentDirectory}manuals/${subDir}`, { intermediates: true });
+        await FileSystem.makeDirectoryAsync(`${FileSystem.documentDirectory}manuals`, { intermediates: true });
       }
 
-      // Download the manual
+      // If it's already a local file, just share it
+      if (manual.url.startsWith('file://')) {
+        console.log('Sharing local file:', manual.url);
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(manual.url, {
+            UTI: 'com.adobe.pdf',
+            mimeType: 'application/pdf',
+            dialogTitle: `Share ${manual.title}`,
+          });
+          return;
+        }
+      }
+
+      // For remote files, download first
+      console.log('Downloading manual to:', destinationUri);
       const downloadResumable = FileSystem.createDownloadResumable(
-        manual.url,
-        downloadedPath,
+        getFullUrl(manual.url),
+        destinationUri,
         {},
         (downloadProgress) => {
           const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
@@ -459,16 +515,26 @@ export default function ProductDetailsScreen() {
       if (!result) {
         throw new Error('Download failed');
       }
-      
+
+      // After successful download, share the file
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(result.uri, {
+          UTI: 'com.adobe.pdf',
+          mimeType: 'application/pdf',
+          dialogTitle: `Share ${manual.title}`,
+        });
+      }
+
       // Save to downloaded manuals list
       const updatedManuals = [...downloadedManuals, manual.title];
       await AsyncStorage.setItem('downloadedManuals', JSON.stringify(updatedManuals));
       setDownloadedManuals(updatedManuals);
 
-      alert('Manual downloaded successfully!');
+      Alert.alert('Success', 'Manual downloaded successfully!');
     } catch (error) {
       console.error('Error downloading manual:', error);
-      alert('Failed to download manual. Please try again.');
+      Alert.alert('Error', 'Failed to download manual. Please try again.');
     }
   };
 
@@ -722,6 +788,14 @@ export default function ProductDetailsScreen() {
           {renderTabContent()}
         </View>
       </ScrollView>
+      
+      {selectedPdfUrl && (
+        <PDFViewer
+          visible={!!selectedPdfUrl}
+          pdfUrl={selectedPdfUrl}
+          onClose={() => setSelectedPdfUrl(null)}
+        />
+      )}
     </View>
   );
 }

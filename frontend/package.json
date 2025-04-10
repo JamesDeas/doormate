@@ -32,6 +32,7 @@
     "expo-image-picker": "~16.0.6",
     "expo-linking": "~7.0.5",
     "expo-router": "~4.0.17",
+    "expo-sharing": "~13.0.1",
     "expo-splash-screen": "~0.29.22",
     "expo-status-bar": "~2.0.1",
     "expo-symbols": "~0.2.2",
@@ -48,7 +49,7 @@
     "react-native-screens": "~4.4.0",
     "react-native-svg": "^15.11.2",
     "react-native-web": "~0.19.13",
-    "react-native-webview": "13.12.5",
+    "react-native-webview": "^13.13.5",
     "use-debounce": "^10.0.4"
   },
   "devDependencies": {
