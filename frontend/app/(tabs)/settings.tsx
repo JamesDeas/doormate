@@ -13,6 +13,7 @@ import {
   Image,
   SafeAreaView,
   FlatList,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -81,6 +82,9 @@ export default function SettingsScreen() {
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const [usernameValid, setUsernameValid] = useState<boolean>(true);
   const usernameCheckTimeout = useRef<NodeJS.Timeout>();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Set mounted ref
   useEffect(() => {
@@ -635,6 +639,26 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) {
+      Alert.alert('Error', 'Please enter your password to confirm deletion');
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await authService.deleteAccount(deletePassword);
+      // Navigate to login after successful deletion
+      router.replace('/auth/login');
+    } catch (error) {
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to delete account');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+      setDeletePassword('');
+    }
+  };
+
   const renderForm = () => (
     <View style={styles.form}>
       <View style={styles.formGroup}>
@@ -897,6 +921,18 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          {isEditing && (
+            <View style={styles.deleteSection}>
+              <TouchableOpacity
+                style={styles.deleteButton}
+                onPress={() => setShowDeleteConfirm(true)}
+              >
+                <MaterialCommunityIcons name="delete" size={24} color="#FF6B6B" />
+                <Text style={styles.deleteButtonText}>Delete Account</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Saved Products Section */}
@@ -931,6 +967,66 @@ export default function SettingsScreen() {
           <MaterialCommunityIcons name="logout" size={24} color="#fff" />
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
+
+        <Modal
+          visible={showDeleteConfirm}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => {
+            setShowDeleteConfirm(false);
+            setDeletePassword('');
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Delete Account</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletePassword('');
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <MaterialCommunityIcons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalText}>
+                Are you sure you want to delete your account? This action cannot be undone.
+              </Text>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Enter your password to confirm"
+                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                secureTextEntry
+                value={deletePassword}
+                onChangeText={setDeletePassword}
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}
+                  onPress={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletePassword('');
+                  }}
+                >
+                  <Text style={styles.buttonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#FF6B6B' }]}
+                  onPress={handleDeleteAccount}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.buttonText}>Delete</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </View>
   );
@@ -1254,5 +1350,78 @@ const styles = StyleSheet.create({
     color: '#F44336',
     fontSize: 14,
     marginTop: 4,
+  },
+  deleteSection: {
+    marginTop: 24,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    paddingTop: 24,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FF6B6B',
+  },
+  deleteButtonText: {
+    marginLeft: 8,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF6B6B',
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: '#8B0000',
+    borderRadius: 12,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  modalText: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 20,
+    lineHeight: 24,
+    opacity: 0.9,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 24,
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
   },
 }); 

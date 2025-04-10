@@ -286,4 +286,26 @@ router.put('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
+// Delete account
+router.delete('/delete-account', authenticateToken, async (req, res) => {
+  try {
+    const { password } = req.body;
+    const user = req.user;
+
+    // Verify password
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Incorrect password' });
+    }
+
+    // Delete the user
+    await User.findByIdAndDelete(user._id);
+
+    res.json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error('Account deletion error:', error);
+    res.status(500).json({ message: 'Error deleting account' });
+  }
+});
+
 module.exports = router; 

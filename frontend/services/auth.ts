@@ -258,6 +258,29 @@ class AuthService {
     }
   }
 
+  async deleteAccount(password: string): Promise<void> {
+    if (!this.token) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(`${API_URL}/auth/delete-account`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to delete account');
+    }
+
+    // Clear auth token after successful deletion
+    await this.clearToken();
+  }
+
   isAuthenticated(): boolean {
     return !!this.token;
   }
