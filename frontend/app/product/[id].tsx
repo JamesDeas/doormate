@@ -212,7 +212,7 @@ const AnimatedGlowButton = ({ children, onPress }: { children: React.ReactNode; 
   );
 };
 
-const renderAIAssistantButton = (product: Product, router: any) => {
+const renderAIAssistantButton = (product: Product, router: any, isOffline: boolean) => {
   // Get all manual URLs with proper base URL
   const manualUrls = product.manuals?.map(manual => ({
     ...manual,
@@ -221,20 +221,28 @@ const renderAIAssistantButton = (product: Product, router: any) => {
 
   return (
     <AnimatedGlowButton
-      onPress={() => router.push({
-        pathname: "/(tabs)/assistant",
-        params: {
-          productId: product._id,
-          productType: determineProductType(product),
-          productName: product.title,
-          modelNumber: product.model,
-          manuals: JSON.stringify(manualUrls)
+      onPress={() => {
+        if (isOffline) {
+          Alert.alert('Offline Mode', 'AI Assistant is not available while offline.');
+          return;
         }
-      })}
+        router.push({
+          pathname: "/(tabs)/assistant",
+          params: {
+            productId: product._id,
+            productType: determineProductType(product),
+            productName: product.title,
+            modelNumber: product.model,
+            manuals: JSON.stringify(manualUrls)
+          }
+        });
+      }}
     >
       <View style={styles.aiAssistantContent}>
         <MaterialCommunityIcons name="robot" size={24} color="#FFFFFF" />
-        <Text style={styles.aiAssistantText}>Ask AI Assistant about this product</Text>
+        <Text style={[styles.aiAssistantText, isOffline && { opacity: 0.5 }]}>
+          {isOffline ? 'AI Assistant (Unavailable Offline)' : 'Ask AI Assistant about this product'}
+        </Text>
       </View>
     </AnimatedGlowButton>
   );
@@ -779,7 +787,7 @@ export default function ProductDetailsScreen() {
             </Text>
           </View>
 
-          {renderAIAssistantButton(product, router)}
+          {renderAIAssistantButton(product, router, isOffline)}
           
           {/* Tab Navigation */}
           <TabNavigation />

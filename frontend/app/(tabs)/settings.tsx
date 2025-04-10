@@ -720,7 +720,12 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
+      <View style={[
+        styles.headerContainer, 
+        { 
+          paddingTop: isOffline ? 0 : insets.top // Remove top padding when offline since the global banner provides spacing
+        }
+      ]}>
         <View style={styles.header}>
           <Text style={styles.title}>Settings</Text>
         </View>
@@ -731,14 +736,6 @@ export default function SettingsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
-        {isOffline && (
-          <View style={styles.offlineBanner}>
-            <Text style={styles.offlineText}>
-              You are offline. Some features may be limited.
-            </Text>
-          </View>
-        )}
-        
         {successMessage ? (
           <Animated.View style={[styles.successMessage, { opacity: successOpacity }]}>
             <MaterialCommunityIcons name="check-circle" size={20} color="#fff" />
@@ -907,12 +904,6 @@ export default function SettingsScreen() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Saved Products</Text>
           </View>
-          {isOffline && (
-            <View style={styles.offlineBanner}>
-              <MaterialCommunityIcons name="wifi-off" size={20} color="#8B4513" />
-              <Text style={styles.offlineText}>You are offline. Viewing saved content.</Text>
-            </View>
-          )}
           {isLoadingSavedProducts ? (
             <ActivityIndicator style={styles.loadingIndicator} />
           ) : savedProducts.length > 0 ? (
@@ -953,6 +944,7 @@ const styles = StyleSheet.create({
   headerContainer: {
     width: '100%',
     backgroundColor: '#8B0000',
+    marginTop: 0, // Ensure no margin at top
   },
   header: {
     paddingHorizontal: '4%',
@@ -1235,18 +1227,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#eee',
     marginVertical: 8,
-  },
-  offlineBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 228, 181, 0.2)',
-    padding: 12,
-    marginBottom: 8,
-  },
-  offlineText: {
-    color: '#FFE4B5',
-    marginLeft: 8,
-    fontSize: 14,
   },
   inputDisabled: {
     opacity: 0.5,
