@@ -10,12 +10,14 @@ import {
   Platform,
   Modal,
   Keyboard,
+  Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import ProfileImage from './ProfileImage';
 import { authService, User } from '@/services/auth';
 import { API_URL } from '@/services/api';
 import { localDatabase } from '@/services/localDatabase';
+import * as ImagePicker from 'expo-image-picker';
 
 interface Comment {
   _id: string;
@@ -30,6 +32,7 @@ interface Comment {
     profileImage?: string;
   };
   text: string;
+  image?: string | null;
   likes: string[];
   likesCount: number;
   replyCount: number;
@@ -56,6 +59,9 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [selectedComment, setSelectedComment] = useState<string | null>(null);
   const [likingComments, setLikingComments] = useState<Set<string>>(new Set());
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [replyImage, setReplyImage] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   useEffect(() => {
     loadComments();
@@ -126,33 +132,104 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
     }
   };
 
+  const pickImage = async (isReply: boolean = false) => {
+    try {
+      // Request permissions
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please grant camera roll permissions to upload images.');
+          return;
+        }
+      }
+      
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled) {
+        if (isReply) {
+          setReplyImage(result.assets[0].uri);
+        } else {
+          setSelectedImage(result.assets[0].uri);
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
   const handleSubmitComment = async () => {
-    if (!newComment.trim()) return;
+    if (!newComment.trim() && !selectedImage) return;
     
     try {
       setIsSubmitting(true);
+      setIsUploadingImage(true);
+      
+      const formData = new FormData();
+      formData.append('text', newComment);
+      
+      if (selectedImage) {
+        // For web, we need to fetch the image as a blob
+        if (Platform.OS === 'web') {
+          try {
+            const response = await fetch(selectedImage);
+            if (!response.ok) throw new Error('Failed to fetch image');
+            const blob = await response.blob();
+            const filename = 'image.jpg';
+            formData.append('image', blob, filename);
+          } catch (error) {
+            console.error('Error processing image:', error);
+            throw new Error('Failed to process image for upload');
+          }
+        } else {
+          // For mobile, we can use the URI directly
+          const filename = selectedImage.split('/').pop() || 'image.jpg';
+          const match = /\.(\w+)$/.exec(filename);
+          const type = match ? `image/${match[1]}` : 'image/jpeg';
+          
+          formData.append('image', {
+            uri: selectedImage,
+            name: filename,
+            type,
+          } as any);
+        }
+      }
+      
+      console.log('Submitting comment with formData:', {
+        text: newComment,
+        hasImage: !!selectedImage,
+        productId
+      });
       
       const response = await fetch(`${API_URL}/products/${productId}/comments`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await authService.getToken()}`,
+          'Authorization': `Bearer ${await authService.getToken()}`
         },
-        body: JSON.stringify({ text: newComment }),
+        body: formData,
       });
       
       if (!response.ok) {
-        throw new Error('Failed to post comment');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.details || errorData.message || 'Failed to post comment');
       }
       
       const newCommentData = await response.json();
       setComments(prevComments => [newCommentData, ...prevComments]);
       setNewComment('');
+      setSelectedImage(null);
     } catch (error) {
       console.error('Error posting comment:', error);
-      Alert.alert('Error', 'Failed to post your comment. Please try again later.');
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to post your comment. Please try again later.');
     } finally {
       setIsSubmitting(false);
+      setIsUploadingImage(false);
     }
   };
 
@@ -324,21 +401,42 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
   };
 
   const handleReply = async (parentId: string) => {
-    if (!replyText.trim()) return;
+    if (!replyText.trim() && !replyImage) return;
     
     try {
       setIsSubmitting(true);
+      setIsUploadingImage(true);
+      
+      const formData = new FormData();
+      formData.append('text', replyText);
+      formData.append('parentId', parentId);
+      
+      if (replyImage) {
+        // For web, we need to convert base64 to blob
+        if (Platform.OS === 'web') {
+          const response = await fetch(replyImage);
+          const blob = await response.blob();
+          formData.append('image', blob, 'image.jpg');
+        } else {
+          // For mobile, we can use the URI directly
+          const filename = replyImage.split('/').pop() || 'image.jpg';
+          const match = /\.(\w+)$/.exec(filename);
+          const type = match ? `image/${match[1]}` : 'image/jpeg';
+          
+          formData.append('image', {
+            uri: replyImage,
+            name: filename,
+            type,
+          } as any);
+        }
+      }
       
       const response = await fetch(`${API_URL}/products/${productId}/comments`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await authService.getToken()}`,
+          'Authorization': `Bearer ${await authService.getToken()}`
         },
-        body: JSON.stringify({ 
-          text: replyText,
-          parentId
-        }),
+        body: formData,
       });
       
       if (!response.ok) {
@@ -363,6 +461,7 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
       );
       
       setReplyText('');
+      setReplyImage(null);
       setReplyingTo(null);
       Keyboard.dismiss();
     } catch (error) {
@@ -370,6 +469,7 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
       Alert.alert('Error', 'Failed to post your reply. Please try again later.');
     } finally {
       setIsSubmitting(false);
+      setIsUploadingImage(false);
     }
   };
 
@@ -400,31 +500,51 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
             placeholderTextColor="rgba(255, 255, 255, 0.5)"
             value={replyText}
             onChangeText={setReplyText}
-            multiline={false}
-            maxLength={500}
+            multiline
           />
           <TouchableOpacity
-            style={[styles.submitButton, styles.closeButton]}
+            style={styles.imageButton}
+            onPress={() => pickImage(true)}
+            disabled={isUploadingImage}
+          >
+            {isUploadingImage ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="image-plus" size={24} color="rgba(255, 255, 255, 0.8)" />
+            )}
+          </TouchableOpacity>
+        </View>
+        {replyImage && (
+          <View style={styles.selectedImageContainer}>
+            <Image source={{ uri: replyImage }} style={styles.selectedImage} />
+            <TouchableOpacity
+              style={styles.removeImageButton}
+              onPress={() => setReplyImage(null)}
+            >
+              <MaterialCommunityIcons name="close-circle" size={24} color="#FF6B6B" />
+            </TouchableOpacity>
+          </View>
+        )}
+        <View style={styles.replyActions}>
+          <TouchableOpacity
+            style={styles.cancelButton}
             onPress={() => {
               setReplyingTo(null);
               setReplyText('');
-              Keyboard.dismiss();
+              setReplyImage(null);
             }}
           >
-            <MaterialCommunityIcons name="close" size={24} color="#fff" />
+            <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.submitButton,
-              (!replyText.trim() || isSubmitting) && styles.submitButtonDisabled
-            ]}
+            style={[styles.submitButton, (!replyText.trim() && !replyImage) && styles.submitButtonDisabled]}
             onPress={() => handleReply(parentId)}
-            disabled={!replyText.trim() || isSubmitting}
+            disabled={isSubmitting || (!replyText.trim() && !replyImage)}
           >
             {isSubmitting ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <MaterialCommunityIcons name="send" size={24} color="#fff" />
+              <Text style={styles.submitButtonText}>Reply</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -435,91 +555,142 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
   const renderReplies = (comment: Comment) => {
     if (!expandedComments.has(comment._id)) return null;
     
-    const commentReplies = replies[comment._id];
-    
-    if (loadingReplies.has(comment._id)) {
-      return (
-        <View style={styles.repliesContainer}>
-          <ActivityIndicator size="small" color="#fff" />
-        </View>
-      );
-    }
-    
-    if (!commentReplies?.length) {
-      return (
-        <View style={styles.repliesContainer}>
-          <Text style={styles.noRepliesText}>No replies yet</Text>
-        </View>
-      );
-    }
+    const commentReplies = replies[comment._id] || [];
     
     return (
       <View style={styles.repliesContainer}>
-        {commentReplies.map(reply => {
-          const canDelete = currentUser && (
-            reply.userId === currentUser._id || // Reply author
-            comment.userId === currentUser._id  // Parent comment owner
-          );
-          
-          return (
-          <View key={reply._id} style={styles.replyItem}>
-            <View style={styles.replyHeader}>
-              <ProfileImage
-                profileImage={reply.user.profileImage}
-                firstName={reply.user.firstName}
-                lastName={reply.user.lastName}
-                size={40}
-                fontSize={16}
-              />
-              <View style={styles.replyInfo}>
-                <View style={styles.replyUserInfo}>
-                  <Text style={styles.replyUsername}>@{reply.user.username}</Text>
-                  <Text style={styles.replyDate}>{formatDate(reply.createdAt)}</Text>
-                  {canDelete && (
-                    <TouchableOpacity
-                      style={styles.replyMenuButton}
-                      onPress={() => setSelectedComment(reply._id)}
-                    >
-                      <MaterialCommunityIcons
-                        name="dots-vertical"
-                        size={20}
-                        color="rgba(255, 255, 255, 0.8)"
-                      />
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <Text style={styles.replyText}>{reply.text}</Text>
-                <View style={styles.replyActions}>
+        {loadingReplies.has(comment._id) ? (
+          <View style={styles.loadingReplies}>
+            <ActivityIndicator size="small" color="#FF6B6B" />
+          </View>
+        ) : commentReplies.length === 0 ? (
+          <Text style={styles.noReplies}>No replies yet</Text>
+        ) : (
+          commentReplies.map(reply => {
+            const isCurrentUserReply = currentUser && reply.userId === currentUser._id;
+            const isLiked = currentUser && reply.likes.includes(currentUser._id);
+            const isLiking = likingComments.has(reply._id);
+            
+            return (
+              <View key={reply._id} style={styles.replyItem}>
+                {isCurrentUserReply && (
                   <TouchableOpacity
-                    style={styles.likeButton}
-                    onPress={() => handleLikeComment(reply._id)}
-                    disabled={likingComments.has(reply._id)}
+                    style={styles.menuButton}
+                    onPress={() => setSelectedComment(reply._id)}
                   >
-                    {likingComments.has(reply._id) ? (
-                      <ActivityIndicator size="small" color="#fff" />
+                    {isDeleting === reply._id ? (
+                      <ActivityIndicator size="small" color="#FF6B6B" />
                     ) : (
-                      <>
-                        <MaterialCommunityIcons
-                          name={reply.likes.includes(currentUser?._id || '') ? "heart" : "heart-outline"}
-                          size={20}
-                          color={reply.likes.includes(currentUser?._id || '') ? "#FF6B6B" : "rgba(255, 255, 255, 0.8)"}
-                        />
-                        {reply.likesCount > 0 && (
-                          <Text style={[
-                            styles.replyLikeCount,
-                            reply.likes.includes(currentUser?._id || '') && styles.likeCountActive
-                          ]}>
-                            {reply.likesCount}
-                          </Text>
-                        )}
-                      </>
+                      <MaterialCommunityIcons name="dots-vertical" size={20} color="rgba(255, 255, 255, 0.8)" />
                     )}
                   </TouchableOpacity>
+                )}
+                <View style={styles.replyInfo}>
+                  <ProfileImage
+                    profileImage={reply.user.profileImage}
+                    firstName={reply.user.firstName}
+                    lastName={reply.user.lastName}
+                    size={32}
+                    fontSize={14}
+                  />
+                  <View style={styles.replyText}>
+                    <View style={styles.replyHeader}>
+                      <Text style={styles.username}>@{reply.user.username}</Text>
+                      <Text style={styles.replyDate}>{formatDate(reply.createdAt)}</Text>
+                    </View>
+                    <Text style={styles.replyContent}>{reply.text}</Text>
+                    {reply.image && (
+                      <View style={styles.commentImageContainer}>
+                        <Image 
+                          source={{ uri: `${API_URL.replace('/api', '')}${reply.image}` }} 
+                          style={styles.commentImage}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    )}
+                    <View style={styles.replyActions}>
+                      <TouchableOpacity
+                        style={styles.likeButton}
+                        onPress={() => handleLikeComment(reply._id)}
+                        disabled={isLiking}
+                      >
+                        {isLiking ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <MaterialCommunityIcons
+                              name={reply.likes.includes(currentUser?._id || '') ? "heart" : "heart-outline"}
+                              size={20}
+                              color={reply.likes.includes(currentUser?._id || '') ? "#FF6B6B" : "rgba(255, 255, 255, 0.8)"}
+                            />
+                            {reply.likesCount > 0 && (
+                              <Text style={[
+                                styles.replyLikeCount,
+                                reply.likes.includes(currentUser?._id || '') && styles.likeCountActive
+                              ]}>
+                                {reply.likesCount}
+                              </Text>
+                            )}
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
               </View>
-            </View>
+            );
+          })
+        )}
+      </View>
+    );
+  };
+
+  const renderCommentInput = () => {
+    return (
+      <View style={styles.commentInputContainer}>
+        <View style={styles.inputWrapper}>
+          <TextInput
+            style={styles.input}
+            placeholder="Write a comment..."
+            placeholderTextColor="rgba(255, 255, 255, 0.5)"
+            value={newComment}
+            onChangeText={setNewComment}
+            multiline
+          />
+          <TouchableOpacity
+            style={styles.imageButton}
+            onPress={() => pickImage(false)}
+            disabled={isUploadingImage}
+          >
+            {isUploadingImage ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="image-plus" size={24} color="rgba(255, 255, 255, 0.8)" />
+            )}
+          </TouchableOpacity>
+        </View>
+        {selectedImage && (
+          <View style={styles.selectedImageContainer}>
+            <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
+            <TouchableOpacity
+              style={styles.removeImageButton}
+              onPress={() => setSelectedImage(null)}
+            >
+              <MaterialCommunityIcons name="close-circle" size={24} color="#FF6B6B" />
+            </TouchableOpacity>
           </View>
-        )})}
+        )}
+        <TouchableOpacity
+          style={[styles.submitButton, (!newComment.trim() && !selectedImage) && styles.submitButtonDisabled]}
+          onPress={handleSubmitComment}
+          disabled={isSubmitting || (!newComment.trim() && !selectedImage)}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.submitButtonText}>Post</Text>
+          )}
+        </TouchableOpacity>
       </View>
     );
   };
@@ -544,19 +715,28 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
           </TouchableOpacity>
         )}
         <View style={styles.commentInfo}>
-        <ProfileImage
-          profileImage={item.user.profileImage}
-          firstName={item.user.firstName}
-          lastName={item.user.lastName}
-          size={40}
-          fontSize={16}
-        />
+          <ProfileImage
+            profileImage={item.user.profileImage}
+            firstName={item.user.firstName}
+            lastName={item.user.lastName}
+            size={40}
+            fontSize={16}
+          />
           <View style={styles.commentText}>
             <View style={styles.commentHeader}>
-          <Text style={styles.username}>@{item.user.username}</Text>
-          <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
+              <Text style={styles.username}>@{item.user.username}</Text>
+              <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
             </View>
             <Text style={styles.commentContent}>{item.text}</Text>
+            {item.image && (
+              <View style={styles.commentImageContainer}>
+                <Image 
+                  source={{ uri: `${API_URL.replace('/api', '')}${item.image}` }} 
+                  style={styles.commentImage}
+                  resizeMode="cover"
+                />
+              </View>
+            )}
             <View style={styles.commentActions}>
               <TouchableOpacity
                 style={styles.likeButton}
@@ -620,106 +800,70 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
             </View>
             {renderReplyInput(item._id)}
             {renderReplies(item)}
+          </View>
         </View>
       </View>
-    </View>
-  );
+    );
   };
 
   return (
-    <>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Discussion</Text>
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Discussion</Text>
       
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={[
-              styles.input,
-              isOffline && styles.inputDisabled
-            ]}
-            placeholder="Share your experience with this product..."
-            placeholderTextColor="rgba(255, 255, 255, 0.5)"
-            value={newComment}
-            onChangeText={setNewComment}
-            multiline={false}
-            maxLength={500}
-            onSubmitEditing={handleSubmitComment}
-            editable={!isOffline}
-          />
-          <TouchableOpacity
-            style={[
-              styles.submitButton,
-              (!newComment.trim() || isSubmitting || isOffline) && styles.submitButtonDisabled
-            ]}
-            onPress={handleSubmitComment}
-            disabled={!newComment.trim() || isSubmitting || isOffline}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator size="small" color="#fff" />
+      {isOffline ? (
+        <Text style={styles.offlineMessage}>Discussion is not available offline</Text>
+      ) : (
+        <>
+          {renderCommentInput()}
+          
+          <View style={styles.discussionArea}>
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#FF6B6B" />
+              </View>
+            ) : comments.length === 0 ? (
+              <Text style={styles.noComments}>No comments yet. Be the first to share your experience!</Text>
             ) : (
-              <MaterialCommunityIcons name="send" size={24} color="#fff" />
+              comments.map(renderComment)
             )}
-          </TouchableOpacity>
-        </View>
-        
-        <View style={styles.discussionArea}>
-          {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B0000" />
-            </View>
-          ) : isOffline ? (
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="cloud-off-outline" size={48} color="rgba(255, 255, 255, 0.5)" />
-              <Text style={styles.emptyText}>Comments are not available while offline. Please check back when you're connected to the internet.</Text>
-            </View>
-          ) : comments.length > 0 ? (
-            <View style={styles.commentsList}>
-              {comments.map(renderComment)}
-            </View>
-          ) : (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No comments yet</Text>
-              <Text style={styles.emptySubText}>Be the first to start the discussion</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
+          </View>
+        </>
+      )}
+      
+      {/* Delete confirmation modal */}
       <Modal
-        visible={selectedComment !== null}
-        transparent={true}
+        visible={!!selectedComment}
+        transparent
         animationType="fade"
         onRequestClose={() => setSelectedComment(null)}
       >
-        <View style={styles.fullScreenModal}>
-          <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setSelectedComment(null)}
-          >
-            <View style={styles.bottomSheet}>
-              <View style={styles.bottomSheetHandle} />
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Delete Comment</Text>
+            <Text style={styles.modalText}>Are you sure you want to delete this comment? This action cannot be undone.</Text>
+            <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.menuItem}
-                onPress={() => {
-                  setSelectedComment(null);
-                  handleDeleteComment(selectedComment!);
-                }}
-              >
-                <MaterialCommunityIcons name="delete-outline" size={24} color="#FF6B6B" />
-                <Text style={styles.menuItemText}>Delete Comment</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelButton}
+                style={[styles.modalButton, styles.cancelModalButton]}
                 onPress={() => setSelectedComment(null)}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.modalButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.deleteModalButton]}
+                onPress={() => {
+                  if (selectedComment) {
+                    handleDeleteComment(selectedComment);
+                    setSelectedComment(null);
+                  }
+                }}
+              >
+                <Text style={[styles.modalButtonText, styles.deleteButtonText]}>Delete</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-    </View>
+          </View>
+        </View>
       </Modal>
-    </>
+    </View>
   );
 };
 
@@ -883,19 +1027,16 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   cancelButton: {
-    padding: 16,
-    marginHorizontal: 8,
-    marginTop: 8,
-    marginBottom: Platform.OS === 'ios' ? 8 : 0,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
+    marginRight: 8,
   },
   cancelButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
-    textAlign: 'center',
-    opacity: 0.8,
   },
   commentActions: {
     flexDirection: 'row',
@@ -937,8 +1078,9 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   replyInfo: {
-    flex: 1,
-    marginLeft: 12,
+    flexDirection: 'row',
+    marginLeft: 16,
+    marginTop: 8,
   },
   replyUsername: {
     fontSize: 16,
@@ -953,17 +1095,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   replyText: {
-    fontSize: 16,
-    color: '#fff',
-    opacity: 0.8,
-    marginTop: 4,
-    width: '100%',
+    flex: 1,
+    marginLeft: 12,
   },
   replyActions: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: 8,
-    gap: 12,
   },
   replyMenuButton: {
     padding: 4,
@@ -1043,6 +1181,119 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 22,
+  },
+  commentInputContainer: {
+    marginBottom: 16,
+  },
+  imageButton: {
+    padding: 8,
+    borderRadius: 4,
+  },
+  selectedImageContainer: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 8,
+  },
+  selectedImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 4,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    padding: 4,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  commentImageContainer: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 8,
+  },
+  commentImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 4,
+  },
+  loadingReplies: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noReplies: {
+    color: '#fff',
+    fontSize: 14,
+    opacity: 0.7,
+    fontStyle: 'italic',
+  },
+  replyContent: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  offlineMessage: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 22,
+  },
+  noComments: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 22,
+  },
+  modalContent: {
+    backgroundColor: '#8B0000',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    width: '100%',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  modalText: {
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    padding: 16,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  cancelModalButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  deleteModalButton: {
+    backgroundColor: '#FF6B6B',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });
 

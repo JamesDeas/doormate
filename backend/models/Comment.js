@@ -13,9 +13,18 @@ const commentSchema = new mongoose.Schema({
   },
   text: {
     type: String,
-    required: true,
+    required: function() {
+      return !this.image; // Text is required only if there's no image
+    },
     trim: true,
     maxlength: 1000
+  },
+  image: {
+    type: String,
+    default: null,
+    required: function() {
+      return !this.text; // Image is required only if there's no text
+    }
   },
   likes: [{
     type: mongoose.Schema.Types.ObjectId,

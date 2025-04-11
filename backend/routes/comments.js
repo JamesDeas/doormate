@@ -3,6 +3,44 @@ const router = express.Router();
 const Comment = require('../models/Comment');
 const User = require('../models/user');
 const { authenticateToken } = require('../middleware/auth');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configure multer for comment image uploads
+const storage = multer.diskStorage({
+  destination: function(req, file, cb) {
+    const dir = 'public/images/comments';
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function(req, file, cb) {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'comment-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: function(req, file, cb) {
+    // Accept only jpeg, jpg, png, webp
+    const filetypes = /jpeg|jpg|png|webp/;
+    const mimetype = filetypes.test(file.mimetype);
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Only jpeg, jpg, png, and webp files are allowed'));
+  }
+});
 
 // Get all comments for a product
 router.get('/products/:productId/comments', async (req, res) => {
@@ -31,6 +69,7 @@ router.get('/products/:productId/comments', async (req, res) => {
         profileImage: comment.userId.profileImage
       },
       text: comment.text,
+      image: comment.image,
       likes: comment.likes || [],
       likesCount: (comment.likes || []).length,
       replyCount: comment.replyCount || 0,
@@ -68,6 +107,7 @@ router.get('/comments/:commentId/replies', async (req, res) => {
         profileImage: reply.userId.profileImage
       },
       text: reply.text,
+      image: reply.image,
       likes: reply.likes || [],
       likesCount: (reply.likes || []).length,
       createdAt: reply.createdAt,
@@ -82,20 +122,40 @@ router.get('/comments/:commentId/replies', async (req, res) => {
 });
 
 // Add a new comment to a product
-router.post('/products/:productId/comments', authenticateToken, async (req, res) => {
+router.post('/products/:productId/comments', authenticateToken, upload.single('image'), async (req, res) => {
   try {
+    console.log('Comment creation request:', {
+      body: req.body,
+      file: req.file,
+      user: req.user,
+      params: req.params
+    });
+    
     const { productId } = req.params;
     const { text, parentId } = req.body;
     const userId = req.user._id;
     
-    if (!text || text.trim().length === 0) {
-      return res.status(400).json({ message: 'Comment text is required' });
+    // Allow comments with either text or image or both
+    if (!text && !req.file) {
+      return res.status(400).json({ message: 'Either comment text or image is required' });
     }
+    
+    // Get image path if an image was uploaded
+    const imagePath = req.file ? `/images/comments/${req.file.filename}` : null;
+    
+    console.log('Creating new comment with:', {
+      productId,
+      userId,
+      text: text || '',
+      imagePath,
+      parentId: parentId || null
+    });
     
     const newComment = new Comment({
       productId,
       userId,
-      text,
+      text: text || '',  // Use empty string if no text
+      image: imagePath,
       likes: [],
       parentId: parentId || null
     });
@@ -126,6 +186,7 @@ router.post('/products/:productId/comments', authenticateToken, async (req, res)
         profileImage: populatedComment.userId.profileImage
       },
       text: populatedComment.text,
+      image: populatedComment.image,
       likes: [],
       likesCount: 0,
       replyCount: 0,
@@ -135,8 +196,12 @@ router.post('/products/:productId/comments', authenticateToken, async (req, res)
     
     res.status(201).json(formattedComment);
   } catch (error) {
-    console.error('Error creating comment:', error);
-    res.status(500).json({ message: 'Error creating comment' });
+    console.error('Detailed error in comment creation:', {
+      error: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ message: 'Error creating comment', details: error.message });
   }
 });
 
@@ -235,7 +300,28 @@ router.delete('/comments/:commentId', authenticateToken, async (req, res) => {
 
     // Delete all replies if this is a parent comment
     if (!comment.parentId) {
+      // Find all replies to get their image paths
+      const replies = await Comment.find({ parentId: commentId });
+      
+      // Delete image files for all replies
+      for (const reply of replies) {
+        if (reply.image) {
+          const imagePath = path.join(__dirname, '..', 'public', reply.image);
+          if (fs.existsSync(imagePath)) {
+            fs.unlinkSync(imagePath);
+          }
+        }
+      }
+      
       await Comment.deleteMany({ parentId: commentId });
+    }
+    
+    // Delete the image file if it exists
+    if (comment.image) {
+      const imagePath = path.join(__dirname, '..', 'public', comment.image);
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+      }
     }
     
     await Comment.findByIdAndDelete(commentId);
