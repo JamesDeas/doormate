@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "expo-file-system": "^18.0.12",
+    "expo-image-manipulator": "^13.0.6",
     "fs-extra": "^11.3.0",
     "multer": "^1.4.5-lts.2",
     "openai": "^4.87.3",

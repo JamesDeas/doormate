@@ -11,6 +11,7 @@ import {
   Modal,
   Keyboard,
   Image,
+  ScrollView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import ProfileImage from './ProfileImage';
@@ -58,10 +59,17 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [selectedComment, setSelectedComment] = useState<string | null>(null);
+  const [selectedReplyForDelete, setSelectedReplyForDelete] = useState<string | null>(null);
   const [likingComments, setLikingComments] = useState<Set<string>>(new Set());
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [selectedCommentForModal, setSelectedCommentForModal] = useState<string | null>(null);
+  const [modalReplyText, setModalReplyText] = useState('');
+  const [modalReplyImage, setModalReplyImage] = useState<string | null>(null);
+  const [isModalSubmitting, setIsModalSubmitting] = useState(false);
+  const [isModalUploadingImage, setIsModalUploadingImage] = useState(false);
+  const [showReplyMenu, setShowReplyMenu] = useState<string | null>(null);
 
   useEffect(() => {
     loadComments();
@@ -161,6 +169,38 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
     } catch (error) {
       console.error('Error picking image:', error);
       Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const takePhoto = async (isReply: boolean = false) => {
+    try {
+      // Request camera permissions
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please grant camera permissions to take photos.');
+          return;
+        }
+      }
+      
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled) {
+        if (isReply) {
+          setReplyImage(result.assets[0].uri);
+        } else {
+          setSelectedImage(result.assets[0].uri);
+        }
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Error', 'Failed to take photo. Please try again.');
     }
   };
 
@@ -460,6 +500,10 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
         )
       );
       
+      // Automatically expand the replies section
+      setExpandedComments(prev => new Set([...prev, parentId]));
+      
+      // Reset reply input and close reply form
       setReplyText('');
       setReplyImage(null);
       setReplyingTo(null);
@@ -488,77 +532,77 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
     }
   };
 
-  const renderReplyInput = (parentId: string) => {
-    if (replyingTo !== parentId) return null;
-    
-    return (
+  const renderReplyInput = (commentId: string) => (
       <View style={styles.replyInputContainer}>
-        <View style={styles.inputWrapper}>
+      <View style={styles.replyInputRow}>
           <TextInput
-            style={styles.input}
+          style={styles.replyInput}
             placeholder="Write a reply..."
-            placeholderTextColor="rgba(255, 255, 255, 0.5)"
+          placeholderTextColor="#fff"
             value={replyText}
             onChangeText={setReplyText}
-            multiline
+          multiline
           />
+        <View style={styles.commentInputButtons}>
           <TouchableOpacity
-            style={styles.imageButton}
+            style={styles.imageButton} 
             onPress={() => pickImage(true)}
             disabled={isUploadingImage}
           >
             {isUploadingImage ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator color="#fff" />
             ) : (
-              <MaterialCommunityIcons name="image-plus" size={24} color="rgba(255, 255, 255, 0.8)" />
+              <MaterialCommunityIcons name="image" size={24} color="#fff" />
             )}
           </TouchableOpacity>
-        </View>
-        {replyImage && (
-          <View style={styles.selectedImageContainer}>
-            <Image source={{ uri: replyImage }} style={styles.selectedImage} />
-            <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={() => setReplyImage(null)}
-            >
-              <MaterialCommunityIcons name="close-circle" size={24} color="#FF6B6B" />
-            </TouchableOpacity>
-          </View>
-        )}
-        <View style={styles.replyActions}>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => {
-              setReplyingTo(null);
-              setReplyText('');
-              setReplyImage(null);
-            }}
+          <TouchableOpacity 
+            style={styles.imageButton} 
+            onPress={() => takePhoto(true)}
+            disabled={isUploadingImage}
           >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
+            {isUploadingImage ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="camera" size={24} color="#fff" />
+            )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.submitButton, (!replyText.trim() && !replyImage) && styles.submitButtonDisabled]}
-            onPress={() => handleReply(parentId)}
-            disabled={isSubmitting || (!replyText.trim() && !replyImage)}
+            style={[
+              styles.submitButton,
+              (!replyText.trim()) && styles.submitButtonDisabled
+            ]}
+            onPress={() => handleReply(commentId)}
+            disabled={!replyText.trim() || isSubmitting}
           >
             {isSubmitting ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.submitButtonText}>Reply</Text>
+              <MaterialCommunityIcons name="send" size={24} color="#fff" />
             )}
           </TouchableOpacity>
         </View>
       </View>
+      {replyImage && (
+        <View style={styles.selectedImageContainer}>
+          <Image source={{ uri: replyImage }} style={styles.selectedImage} />
+          <TouchableOpacity 
+            style={styles.removeImageButton}
+            onPress={() => setReplyImage(null)}
+          >
+            <MaterialCommunityIcons name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+      </View>
     );
-  };
 
   const renderReplies = (comment: Comment) => {
     if (!expandedComments.has(comment._id)) return null;
     
     const commentReplies = replies[comment._id] || [];
     
-    return (
-      <View style={styles.repliesContainer}>
+      return (
+        <View style={styles.repliesContainer}>
         {loadingReplies.has(comment._id) ? (
           <View style={styles.loadingReplies}>
             <ActivityIndicator size="small" color="#FF6B6B" />
@@ -576,7 +620,7 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
                 {isCurrentUserReply && (
                   <TouchableOpacity
                     style={styles.menuButton}
-                    onPress={() => setSelectedComment(reply._id)}
+                    onPress={() => setShowReplyMenu(reply._id)}
                   >
                     {isDeleting === reply._id ? (
                       <ActivityIndicator size="small" color="#FF6B6B" />
@@ -584,6 +628,20 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
                       <MaterialCommunityIcons name="dots-vertical" size={20} color="rgba(255, 255, 255, 0.8)" />
                     )}
                   </TouchableOpacity>
+                )}
+                {showReplyMenu === reply._id && (
+                  <View style={styles.replyMenu}>
+                    <TouchableOpacity
+                      style={styles.replyMenuItem}
+                      onPress={() => {
+                        setShowReplyMenu(null);
+                        setSelectedReplyForDelete(reply._id);
+                      }}
+                    >
+                      <MaterialCommunityIcons name="trash-can" size={20} color="#FF6B6B" />
+                      <Text style={styles.replyMenuItemText}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
                 <View style={styles.replyInfo}>
                   <ProfileImage
@@ -604,7 +662,7 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
                         <Image 
                           source={{ uri: `${API_URL.replace('/api', '')}${reply.image}` }} 
                           style={styles.commentImage}
-                          resizeMode="cover"
+                          resizeMode="contain"
                         />
                       </View>
                     )}
@@ -615,7 +673,7 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
                         disabled={isLiking}
                       >
                         {isLiking ? (
-                          <ActivityIndicator size="small" color="#fff" />
+          <ActivityIndicator size="small" color="#fff" />
                         ) : (
                           <>
                             <MaterialCommunityIcons
@@ -637,61 +695,466 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
                     </View>
                   </View>
                 </View>
-              </View>
-            );
+        </View>
+      );
           })
         )}
       </View>
     );
   };
 
-  const renderCommentInput = () => {
-    return (
-      <View style={styles.commentInputContainer}>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.input}
-            placeholder="Write a comment..."
-            placeholderTextColor="rgba(255, 255, 255, 0.5)"
-            value={newComment}
-            onChangeText={setNewComment}
-            multiline
-          />
-          <TouchableOpacity
-            style={styles.imageButton}
+  const renderCommentInput = () => (
+    <View style={styles.commentInputContainer}>
+      <View style={styles.commentInputRow}>
+        <TextInput
+          style={styles.commentInput}
+          placeholder="Add a comment..."
+          placeholderTextColor="#fff"
+          value={newComment}
+          onChangeText={setNewComment}
+          multiline
+        />
+        <View style={styles.commentInputButtons}>
+          <TouchableOpacity 
+            style={styles.imageButton} 
             onPress={() => pickImage(false)}
             disabled={isUploadingImage}
           >
             {isUploadingImage ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator color="#fff" />
             ) : (
-              <MaterialCommunityIcons name="image-plus" size={24} color="rgba(255, 255, 255, 0.8)" />
+              <MaterialCommunityIcons name="image" size={24} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.imageButton} 
+            onPress={() => takePhoto(false)}
+            disabled={isUploadingImage}
+          >
+            {isUploadingImage ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="camera" size={24} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              (!newComment.trim() && !selectedImage) && styles.submitButtonDisabled
+            ]}
+            onPress={handleSubmitComment}
+            disabled={!newComment.trim() && !selectedImage || isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="send" size={24} color="#fff" />
             )}
           </TouchableOpacity>
         </View>
-        {selectedImage && (
-          <View style={styles.selectedImageContainer}>
-            <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
-            <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={() => setSelectedImage(null)}
-            >
-              <MaterialCommunityIcons name="close-circle" size={24} color="#FF6B6B" />
-            </TouchableOpacity>
-          </View>
-        )}
-        <TouchableOpacity
-          style={[styles.submitButton, (!newComment.trim() && !selectedImage) && styles.submitButtonDisabled]}
-          onPress={handleSubmitComment}
-          disabled={isSubmitting || (!newComment.trim() && !selectedImage)}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.submitButtonText}>Post</Text>
-          )}
-        </TouchableOpacity>
       </View>
+      {selectedImage && (
+        <View style={styles.selectedImageContainer}>
+          <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
+          <TouchableOpacity 
+            style={styles.removeImageButton}
+            onPress={() => setSelectedImage(null)}
+          >
+            <MaterialCommunityIcons name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+        </View>
+      );
+
+  const handleModalReply = async (parentId: string) => {
+    if (!modalReplyText.trim() && !modalReplyImage) return;
+    
+    try {
+      setIsModalSubmitting(true);
+      setIsModalUploadingImage(true);
+      
+      const formData = new FormData();
+      formData.append('text', modalReplyText);
+      formData.append('parentId', parentId);
+      
+      if (modalReplyImage) {
+        // For web, we need to convert base64 to blob
+        if (Platform.OS === 'web') {
+          const response = await fetch(modalReplyImage);
+          const blob = await response.blob();
+          formData.append('image', blob, 'image.jpg');
+        } else {
+          // For mobile, we can use the URI directly
+          const filename = modalReplyImage.split('/').pop() || 'image.jpg';
+          const match = /\.(\w+)$/.exec(filename);
+          const type = match ? `image/${match[1]}` : 'image/jpeg';
+          
+          formData.append('image', {
+            uri: modalReplyImage,
+            name: filename,
+            type,
+          } as any);
+        }
+      }
+      
+      const response = await fetch(`${API_URL}/products/${productId}/comments`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${await authService.getToken()}`
+        },
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to post reply');
+      }
+      
+      const newReply = await response.json();
+      
+      // Update replies state
+      setReplies(prev => ({
+        ...prev,
+        [parentId]: [...(prev[parentId] || []), newReply]
+      }));
+      
+      // Update the reply count of the parent comment
+      setComments(prevComments =>
+        prevComments.map(c =>
+          c._id === parentId
+            ? { ...c, replyCount: c.replyCount + 1 }
+            : c
+        )
+      );
+      
+      // Reset modal reply input
+      setModalReplyText('');
+      setModalReplyImage(null);
+      Keyboard.dismiss();
+    } catch (error) {
+      console.error('Error posting reply:', error);
+      Alert.alert('Error', 'Failed to post your reply. Please try again later.');
+    } finally {
+      setIsModalSubmitting(false);
+      setIsModalUploadingImage(false);
+    }
+  };
+  
+  const pickImageForModal = async () => {
+    try {
+      // Request permissions
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please grant camera roll permissions to upload images.');
+          return;
+        }
+      }
+      
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled) {
+        setModalReplyImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+  
+  const takePhotoForModal = async () => {
+    try {
+      // Request camera permissions
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please grant camera permissions to take photos.');
+          return;
+        }
+      }
+      
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled) {
+        setModalReplyImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Error', 'Failed to take photo. Please try again.');
+    }
+  };
+  
+  const renderModalReplyInput = (commentId: string) => (
+    <View style={styles.modalReplyInputContainer}>
+      <View style={styles.modalReplyInputRow}>
+        <TextInput
+          style={styles.modalReplyInput}
+          placeholder="Write a reply..."
+          placeholderTextColor="#fff"
+          value={modalReplyText}
+          onChangeText={setModalReplyText}
+          multiline
+        />
+        <View style={styles.commentInputButtons}>
+          <TouchableOpacity 
+            style={styles.imageButton} 
+            onPress={pickImageForModal}
+            disabled={isModalUploadingImage}
+          >
+            {isModalUploadingImage ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="image" size={24} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.imageButton} 
+            onPress={takePhotoForModal}
+            disabled={isModalUploadingImage}
+          >
+            {isModalUploadingImage ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="camera" size={24} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              (!modalReplyText.trim() && !modalReplyImage) && styles.submitButtonDisabled
+            ]}
+            onPress={() => handleModalReply(commentId)}
+            disabled={!modalReplyText.trim() && !modalReplyImage || isModalSubmitting}
+          >
+            {isModalSubmitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="send" size={24} color="#fff" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+      {modalReplyImage && (
+        <View style={styles.selectedImageContainer}>
+          <Image source={{ uri: modalReplyImage }} style={styles.selectedImage} />
+          <TouchableOpacity 
+            style={styles.removeImageButton}
+            onPress={() => setModalReplyImage(null)}
+          >
+            <MaterialCommunityIcons name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+  
+  const renderReplyMenu = (replyId: string) => (
+    <View style={styles.replyMenuDropdown}>
+      <TouchableOpacity
+        style={styles.replyMenuItem}
+        onPress={() => {
+          setShowReplyMenu(null);
+          setSelectedReplyForDelete(replyId);
+        }}
+      >
+        <MaterialCommunityIcons name="delete" size={20} color="#FF6B6B" />
+        <Text style={styles.replyMenuItemText}>Delete</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderRepliesModal = (comment: Comment) => {
+    if (!selectedCommentForModal) return null;
+    
+    // Find the correct comment that was selected for the modal
+    const selectedComment = comments.find(c => c._id === selectedCommentForModal);
+    if (!selectedComment) return null;
+    
+    // Make sure we're using the correct comment ID for the modal
+    const commentReplies = replies[selectedCommentForModal] || [];
+          
+          return (
+      <Modal
+        visible={!!selectedCommentForModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedCommentForModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Comments</Text>
+              <TouchableOpacity
+                style={styles.closeModalButton}
+                onPress={() => {
+                  setSelectedCommentForModal(null);
+                  setModalReplyText('');
+                  setModalReplyImage(null);
+                }}
+              >
+                <MaterialCommunityIcons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalScrollContent}>
+              <View style={styles.modalCommentContainer}>
+                <View style={styles.modalCommentHeader}>
+              <ProfileImage
+                    profileImage={selectedComment.user.profileImage}
+                    firstName={selectedComment.user.firstName}
+                    lastName={selectedComment.user.lastName}
+                size={40}
+                fontSize={16}
+              />
+                  <View style={styles.modalCommentInfo}>
+                    <Text style={styles.modalUsername}>@{selectedComment.user.username}</Text>
+                    <Text style={styles.modalCommentDate}>{formatDate(selectedComment.createdAt)}</Text>
+                  </View>
+                </View>
+                <Text style={styles.modalCommentText}>{selectedComment.text}</Text>
+                {selectedComment.image && (
+                  <View style={styles.modalCommentImageContainer}>
+                    <Image 
+                      source={{ uri: `${API_URL.replace('/api', '')}${selectedComment.image}` }} 
+                      style={styles.modalCommentImage}
+                      resizeMode="contain"
+                    />
+                  </View>
+                )}
+              </View>
+              
+              <View style={styles.modalRepliesSection}>
+                {loadingReplies.has(selectedCommentForModal) ? (
+                  <View style={styles.loadingReplies}>
+                    <ActivityIndicator size="small" color="#FF6B6B" />
+                  </View>
+                ) : commentReplies.length === 0 ? (
+                  <Text style={styles.noReplies}>No replies yet</Text>
+                ) : (
+                  commentReplies.map(reply => {
+                    const isCurrentUserReply = currentUser && reply.userId === currentUser._id;
+                    const isLiked = currentUser && reply.likes.includes(currentUser._id);
+                    const isLiking = likingComments.has(reply._id);
+                    
+                    return (
+                      <View key={reply._id} style={styles.modalReplyItem}>
+                        {isCurrentUserReply && (
+                    <TouchableOpacity
+                            style={styles.menuButton}
+                            onPress={() => setShowReplyMenu(reply._id)}
+                          >
+                            {isDeleting === reply._id ? (
+                              <ActivityIndicator size="small" color="#FF6B6B" />
+                            ) : (
+                              <MaterialCommunityIcons name="dots-vertical" size={20} color="rgba(255, 255, 255, 0.8)" />
+                            )}
+                    </TouchableOpacity>
+                  )}
+                        {showReplyMenu === reply._id && renderReplyMenu(reply._id)}
+                        <View style={styles.modalReplyInfo}>
+                          <ProfileImage
+                            profileImage={reply.user.profileImage}
+                            firstName={reply.user.firstName}
+                            lastName={reply.user.lastName}
+                            size={32}
+                            fontSize={14}
+                          />
+                          <View style={styles.modalReplyText}>
+                            <View style={styles.modalReplyHeader}>
+                              <Text style={styles.modalUsername}>@{reply.user.username}</Text>
+                              <Text style={styles.modalReplyDate}>{formatDate(reply.createdAt)}</Text>
+                </View>
+                            <Text style={styles.modalReplyContent}>{reply.text}</Text>
+                            {reply.image && (
+                              <View style={styles.modalCommentImageContainer}>
+                                <Image 
+                                  source={{ uri: `${API_URL.replace('/api', '')}${reply.image}` }} 
+                                  style={styles.modalCommentImage}
+                                  resizeMode="contain"
+                                />
+                              </View>
+                            )}
+                            <View style={styles.modalReplyActions}>
+                  <TouchableOpacity
+                    style={styles.likeButton}
+                    onPress={() => handleLikeComment(reply._id)}
+                                disabled={isLiking}
+                  >
+                                {isLiking ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <MaterialCommunityIcons
+                                      name={isLiked ? "heart" : "heart-outline"}
+                          size={20}
+                                      color={isLiked ? "#FF6B6B" : "rgba(255, 255, 255, 0.8)"}
+                        />
+                        {reply.likesCount > 0 && (
+                          <Text style={[
+                                        styles.likeCount,
+                                        isLiked && styles.likeCountActive
+                          ]}>
+                            {reply.likesCount}
+                          </Text>
+                        )}
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </View>
+                    );
+                  })
+                )}
+      </View>
+            </ScrollView>
+            
+            {renderModalReplyInput(selectedCommentForModal)}
+
+            {/* Delete reply confirmation modal */}
+            {selectedReplyForDelete && (
+              <View style={styles.replyDeleteModalOverlay}>
+                <View style={styles.deleteModalContent}>
+                  <Text style={styles.modalTitle}>Delete Reply</Text>
+                  <Text style={styles.modalText}>Are you sure you want to delete this reply? This action cannot be undone.</Text>
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalButton, styles.cancelModalButton]}
+                      onPress={() => setSelectedReplyForDelete(null)}
+                    >
+                      <Text style={styles.modalButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.modalButton, styles.deleteModalButton]}
+                      onPress={() => {
+                        if (selectedReplyForDelete) {
+                          handleDeleteComment(selectedReplyForDelete);
+                          setSelectedReplyForDelete(null);
+                        }
+                      }}
+                    >
+                      <Text style={[styles.modalButtonText, styles.deleteButtonText]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -715,25 +1178,27 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
           </TouchableOpacity>
         )}
         <View style={styles.commentInfo}>
-          <ProfileImage
-            profileImage={item.user.profileImage}
-            firstName={item.user.firstName}
-            lastName={item.user.lastName}
-            size={40}
-            fontSize={16}
-          />
-          <View style={styles.commentText}>
-            <View style={styles.commentHeader}>
-              <Text style={styles.username}>@{item.user.username}</Text>
-              <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
+          <View style={styles.commentHeader}>
+        <ProfileImage
+          profileImage={item.user.profileImage}
+          firstName={item.user.firstName}
+          lastName={item.user.lastName}
+          size={40}
+          fontSize={16}
+        />
+            <View style={styles.userInfo}>
+          <Text style={styles.username}>@{item.user.username}</Text>
+          <Text style={styles.commentDate}>{formatDate(item.createdAt)}</Text>
             </View>
+          </View>
+          <View style={styles.commentText}>
             <Text style={styles.commentContent}>{item.text}</Text>
             {item.image && (
               <View style={styles.commentImageContainer}>
                 <Image 
                   source={{ uri: `${API_URL.replace('/api', '')}${item.image}` }} 
                   style={styles.commentImage}
-                  resizeMode="cover"
+                  resizeMode="contain"
                 />
               </View>
             )}
@@ -764,104 +1229,87 @@ const Discussion: React.FC<DiscussionProps> = ({ productId, isOffline }) => {
                 )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.replyButton}
+                style={styles.chatButton}
                 onPress={() => {
-                  if (!currentUser) {
-                    Alert.alert('Sign In Required', 'Please sign in to reply to comments.');
-                    return;
+                  if (!replies[item._id]) {
+                    loadReplies(item._id);
                   }
-                  setReplyingTo(item._id);
+                  setSelectedCommentForModal(item._id);
                 }}
               >
                 <MaterialCommunityIcons
-                  name="reply"
+                  name="chat"
                   size={20}
                   color="rgba(255, 255, 255, 0.8)"
                 />
-                <Text style={styles.replyButtonText}>Reply</Text>
-              </TouchableOpacity>
-              {item.replyCount > 0 && (
-                <TouchableOpacity
-                  style={styles.showRepliesButton}
-                  onPress={() => toggleReplies(item._id)}
-                >
-                  <MaterialCommunityIcons
-                    name={expandedComments.has(item._id) ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color="rgba(255, 255, 255, 0.8)"
-                  />
-                  <Text style={styles.showRepliesText}>
-                    {expandedComments.has(item._id)
-                      ? 'Hide Replies'
-                      : `${item.replyCount} ${item.replyCount === 1 ? 'Reply' : 'Replies'}`}
+                <Text style={styles.chatButtonText}>
+                  {item.replyCount > 0 ? item.replyCount : 'Reply'}
                   </Text>
                 </TouchableOpacity>
-              )}
             </View>
-            {renderReplyInput(item._id)}
-            {renderReplies(item)}
-          </View>
+            {renderRepliesModal(item)}
         </View>
       </View>
-    );
+    </View>
+  );
   };
 
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Discussion</Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Discussion</Text>
       
-      {isOffline ? (
-        <Text style={styles.offlineMessage}>Discussion is not available offline</Text>
-      ) : (
-        <>
-          {renderCommentInput()}
-          
-          <View style={styles.discussionArea}>
-            {isLoading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#FF6B6B" />
-              </View>
-            ) : comments.length === 0 ? (
-              <Text style={styles.noComments}>No comments yet. Be the first to share your experience!</Text>
-            ) : (
-              comments.map(renderComment)
-            )}
-          </View>
-        </>
-      )}
-      
-      {/* Delete confirmation modal */}
+    {isOffline ? (
+      <Text style={styles.offlineMessage}>Discussion is not available offline</Text>
+    ) : (
+      <>
+        {renderCommentInput()}
+        
+        <View style={styles.discussionArea}>
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#FF6B6B" />
+            </View>
+          ) : comments.length === 0 ? (
+            <Text style={styles.noComments}>No comments yet. Be the first to share your experience!</Text>
+          ) : (
+            comments.map(renderComment)
+          )}
+        </View>
+      </>
+    )}
+
+    {/* Delete post confirmation modal */}
       <Modal
-        visible={!!selectedComment}
-        transparent
+      visible={!!selectedComment}
+      transparent
         animationType="fade"
         onRequestClose={() => setSelectedComment(null)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Delete Comment</Text>
-            <Text style={styles.modalText}>Are you sure you want to delete this comment? This action cannot be undone.</Text>
-            <View style={styles.modalActions}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.deleteModalContent}>
+          <Text style={styles.modalTitle}>Delete Comment</Text>
+          <Text style={styles.modalText}>Are you sure you want to delete this comment? This action cannot be undone.</Text>
+          <View style={styles.modalActions}>
+          <TouchableOpacity
+              style={[styles.modalButton, styles.cancelModalButton]}
+            onPress={() => setSelectedComment(null)}
+          >
+              <Text style={styles.modalButtonText}>Cancel</Text>
+            </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.cancelModalButton]}
-                onPress={() => setSelectedComment(null)}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.deleteModalButton]}
+              style={[styles.modalButton, styles.deleteModalButton]}
                 onPress={() => {
-                  if (selectedComment) {
-                    handleDeleteComment(selectedComment);
-                    setSelectedComment(null);
-                  }
-                }}
-              >
-                <Text style={[styles.modalButtonText, styles.deleteButtonText]}>Delete</Text>
+                if (selectedComment) {
+                  handleDeleteComment(selectedComment);
+                  setSelectedComment(null);
+                }
+              }}
+            >
+              <Text style={[styles.modalButtonText, styles.deleteButtonText]}>Delete</Text>
               </TouchableOpacity>
             </View>
-          </View>
         </View>
+    </View>
       </Modal>
     </View>
   );
@@ -901,30 +1349,32 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   commentInfo: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  commentText: {
-    marginLeft: 12,
-    flex: 1,
+    flexDirection: 'column',
+    width: '100%',
   },
   commentHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  userInfo: {
+    marginLeft: 12,
+    flex: 1,
   },
   username: {
     fontSize: 16,
     color: '#fff',
     fontWeight: '500',
     opacity: 0.9,
-    marginRight: 8,
+    marginBottom: 2,
   },
   commentDate: {
     fontSize: 14,
     color: '#fff',
     opacity: 0.7,
-    marginRight: 8,
+  },
+  commentText: {
+    width: '100%',
   },
   commentContent: {
     fontSize: 16,
@@ -993,6 +1443,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#8B0000',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    width: '100%',
+    height: '80%',
+  },
+  deleteModalContent: {
+    backgroundColor: '#8B0000',
+    borderRadius: 20,
+    padding: 20,
   },
   bottomSheet: {
     backgroundColor: '#8B0000',
@@ -1118,22 +1580,23 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   replyInputContainer: {
-    marginTop: 16,
-    marginBottom: 8,
-    width: '100%',
+    marginTop: 8,
+    marginBottom: 16,
   },
-  closeButton: {
-    marginRight: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  replyInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   replyInput: {
-    fontSize: 14,
-    color: '#fff',
-    minHeight: 36,
+    flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: 8,
+    padding: 12,
+    color: '#fff',
+    fontSize: 14,
+    minHeight: 40,
+    maxHeight: 120,
   },
   replyInputButtons: {
     flexDirection: 'row',
@@ -1184,10 +1647,34 @@ const styles = StyleSheet.create({
   },
   commentInputContainer: {
     marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  commentInputRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  commentInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    color: '#fff',
+    fontSize: 16,
+    minHeight: 40,
+    maxHeight: 120,
+  },
+  commentInputButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   imageButton: {
     padding: 8,
-    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
   },
   selectedImageContainer: {
     marginTop: 8,
@@ -1217,11 +1704,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 8,
-    padding: 8,
+    overflow: 'hidden',
+    width: '100%',
   },
   commentImage: {
-    width: 100,
-    height: 100,
+    width: '100%',
+    height: undefined,
+    aspectRatio: 1,
     borderRadius: 4,
   },
   loadingReplies: {
@@ -1252,13 +1741,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
     lineHeight: 22,
-  },
-  modalContent: {
-    backgroundColor: '#8B0000',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    width: '100%',
   },
   modalTitle: {
     fontSize: 18,
@@ -1294,6 +1776,183 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  modalReplyInputContainer: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 16,
+    backgroundColor: '#8B0000',
+  },
+  modalReplyInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalReplyInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    color: '#fff',
+    fontSize: 14,
+    minHeight: 40,
+    maxHeight: 120,
+  },
+  chatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 16,
+  },
+  chatButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    marginLeft: 4,
+    opacity: 0.9,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  closeModalButton: {
+    padding: 4,
+  },
+  modalCommentContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  modalCommentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalCommentInfo: {
+    marginLeft: 12,
+  },
+  modalUsername: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  modalCommentDate: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  modalCommentText: {
+    fontSize: 16,
+    color: '#fff',
+    lineHeight: 22,
+  },
+  modalCommentImageContainer: {
+    marginTop: 8,
+    borderRadius: 8,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  modalCommentImage: {
+    width: '100%',
+    height: undefined,
+    aspectRatio: 1,
+    borderRadius: 8,
+  },
+  modalRepliesSection: {
+    padding: 16,
+    paddingTop: 0,
+  },
+  modalReplyItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  modalReplyInfo: {
+    flexDirection: 'row',
+  },
+  modalReplyText: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  modalReplyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  modalReplyDate: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginLeft: 8,
+  },
+  modalReplyContent: {
+    fontSize: 14,
+    color: '#fff',
+    lineHeight: 20,
+  },
+  modalReplyActions: {
+    flexDirection: 'row',
+    marginTop: 8,
+  },
+  modalScrollContent: {
+    flex: 1,
+  },
+  replyMenuDropdown: {
+    position: 'absolute',
+    backgroundColor: '#8B0000',
+    borderRadius: 8,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  replyMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 4,
+  },
+  replyMenuItemText: {
+    color: '#FF6B6B',
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  replyDeleteModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2000,
+  },
+  replyMenu: {
+    position: 'absolute',
+    right: 8,
+    top: 40,
+    backgroundColor: '#8B0000',
+    borderRadius: 8,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
 });
 
