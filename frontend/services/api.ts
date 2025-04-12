@@ -112,6 +112,7 @@ export interface ChatRequest {
   productId?: string;
   productType?: 'door' | 'gate' | 'motor' | 'controlSystem';
   manuals?: string;  // JSON stringified array of manual objects
+  discussions?: string;  // JSON stringified array of discussion objects
   highlightedText?: string;
   previousMessages?: Array<{
     id: string;

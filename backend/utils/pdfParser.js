@@ -1,43 +1,138 @@
 const fs = require('fs').promises;
 const PDF2JSON = require('pdf2json');
+const path = require('path');
 
 class PDFParser {
   static async extractText(filePath) {
     try {
-      console.log('PDFParser: Attempting to read file:', filePath);
+      console.log('PDFParser: Starting extraction for:', filePath);
+      
+      // Normalize path
+      const normalizedPath = path.resolve(filePath);
+      console.log('PDFParser: Normalized path:', normalizedPath);
+      
+      // First check if file exists
+      try {
+        const stats = await fs.stat(normalizedPath);
+        console.log('PDFParser: File stats:', {
+          size: stats.size,
+          isFile: stats.isFile(),
+          path: normalizedPath
+        });
+        
+        if (!stats.isFile()) {
+          throw new Error('Path exists but is not a file');
+        }
+      } catch (error) {
+        console.error('PDFParser: File access error:', {
+          error: error.message,
+          path: normalizedPath
+        });
+        throw new Error(`File access error: ${error.message}`);
+      }
       
       const pdfParser = new PDF2JSON();
       
+      // Configure parser
+      pdfParser.on('pdfParser_onError', 
+        errData => console.error('PDFParser: Error event:', errData.parserError)
+      );
+      pdfParser.on('pdfParser_onProgress', 
+        progress => console.log('PDFParser: Progress:', progress)
+      );
+      
       const data = await new Promise((resolve, reject) => {
         pdfParser.on('pdfParser_dataReady', (pdfData) => {
+          console.log('PDFParser: Data ready event received');
+          
+          if (!pdfData || !pdfData.Pages || !Array.isArray(pdfData.Pages)) {
+            console.error('PDFParser: Invalid PDF data structure:', {
+              hasData: !!pdfData,
+              hasPages: pdfData && !!pdfData.Pages,
+              isArray: pdfData && pdfData.Pages && Array.isArray(pdfData.Pages)
+            });
+            reject(new Error('Invalid PDF data structure'));
+            return;
+          }
+          
+          console.log('PDFParser: Valid PDF structure detected:', {
+            pages: pdfData.Pages.length,
+            hasContent: pdfData.Pages.some(p => p.Texts && p.Texts.length > 0)
+          });
+          
           resolve(pdfData);
         });
         
         pdfParser.on('pdfParser_dataError', (error) => {
+          console.error('PDFParser: Data error event:', error);
           reject(error);
         });
         
-        pdfParser.loadPDF(filePath);
+        try {
+          console.log('PDFParser: Attempting to load PDF:', normalizedPath);
+          pdfParser.loadPDF(normalizedPath);
+        } catch (error) {
+          console.error('PDFParser: Load error:', {
+            error: error.message,
+            stack: error.stack
+          });
+          reject(error);
+        }
       });
       
-      console.log('PDFParser: Successfully parsed PDF:', {
-        pages: data.Pages.length
+      // Convert all pages to text with better error handling
+      const textByPage = data.Pages.map((page, pageIndex) => {
+        if (!page.Texts) {
+          console.warn(`PDFParser: No texts found on page ${pageIndex + 1}`);
+          return '';
+        }
+        
+        const pageTexts = page.Texts.map(text => {
+          try {
+            if (!text.R || !text.R[0] || !text.R[0].T) {
+              console.warn(`PDFParser: Invalid text structure on page ${pageIndex + 1}:`, text);
+              return '';
+            }
+            const decoded = decodeURIComponent(text.R[0].T);
+            return decoded;
+          } catch (error) {
+            console.error(`PDFParser: Text decode error on page ${pageIndex + 1}:`, {
+              error: error.message,
+              text: text
+            });
+            return '';
+          }
+        });
+        
+        console.log(`PDFParser: Extracted ${pageTexts.length} text elements from page ${pageIndex + 1}`);
+        return pageTexts.join(' ');
       });
       
-      // Convert all pages to text
-      const text = data.Pages.map(page => 
-        page.Texts.map(text => decodeURIComponent(text.R[0].T)).join(' ')
-      ).join('\n\n');
+      const text = textByPage.join('\n\n');
+      
+      console.log('PDFParser: Extraction complete:', {
+        totalLength: text.length,
+        pageCount: data.Pages.length,
+        nonEmptyPages: textByPage.filter(p => p.trim().length > 0).length
+      });
+      
+      if (!text.trim()) {
+        console.warn('PDFParser: No text content extracted from PDF');
+      }
       
       return {
         text,
         numPages: data.Pages.length,
-        info: {},
-        metadata: {},
+        info: data.Meta || {},
+        metadata: data.Metadata || {},
         version: '1.0'
       };
     } catch (error) {
-      console.error('PDFParser: Error parsing PDF:', error);
+      console.error('PDFParser: Fatal error:', {
+        error: error.message,
+        stack: error.stack,
+        filePath: filePath
+      });
       throw new Error(`Failed to parse PDF: ${error.message}`);
     }
   }

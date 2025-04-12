@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -43,14 +43,56 @@ export default function AssistantScreen() {
   const retryTimerRef = useRef<NodeJS.Timeout>();
   const scrollViewRef = useRef<ScrollView>(null);
   const collapseAnimation = useRef(new Animated.Value(1)).current;
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   // Get product context from route params
-  const productContext = {
+  const productContext = useMemo(() => ({
     productId: params.productId as string,
     productType: params.productType as 'door' | 'gate' | 'motor' | 'controlSystem',
-    manuals: params.manuals as string,  // This is already JSON stringified from the product page
+    productName: params.productName as string,
+    modelNumber: params.modelNumber as string,
+    manuals: params.manuals as string,
+    discussions: params.discussions as string,
     highlightedText: params.highlightedText as string
-  };
+  }), [params]);
+
+  // Add initial welcome message when product context exists
+  useEffect(() => {
+    if (!messages.length && productContext.productId && productContext.productName) {
+      setMessages([{
+        id: Date.now().toString(),
+        text: `Hello! I'm here to help you with the ${productContext.productName}${productContext.modelNumber ? ` (Model: ${productContext.modelNumber})` : ''}. What would you like to know about this product?`,
+        sender: 'assistant',
+        timestamp: new Date()
+      }]);
+    }
+  }, [productContext.productId, productContext.productName, productContext.modelNumber, messages.length]);
+
+  // Handle page refresh or direct navigation
+  useEffect(() => {
+    const handleRefresh = async () => {
+      // If there's no product context but we're in the assistant tab, show general welcome
+      if (!productContext.productId && !messages.length) {
+        setMessages([{
+          id: Date.now().toString(),
+          text: "Hello! I'm here to help you with any questions about our products. What would you like to know?",
+          sender: 'assistant',
+          timestamp: new Date()
+        }]);
+      }
+    };
+
+    handleRefresh();
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) {
+        clearInterval(retryTimerRef.current);
+      }
+    };
+  }, []);
 
   const generalSuggestions = [
     "How to maintain a sectional door?",
@@ -111,8 +153,17 @@ export default function AssistantScreen() {
       await assistantApi.chat(
         {
           message: userMessage.text,
-          ...productContext,
-          previousMessages: messages
+          productId: productContext.productId,
+          productType: productContext.productType,
+          manuals: productContext.manuals,
+          discussions: productContext.discussions,
+          highlightedText: productContext.highlightedText,
+          previousMessages: messages.map(msg => ({
+            id: msg.id,
+            text: msg.text,
+            sender: msg.sender,
+            timestamp: msg.timestamp
+          }))
         },
         (chunk) => {
           streamedText += chunk;
@@ -126,7 +177,6 @@ export default function AssistantScreen() {
         }
       );
 
-      // Update the message to remove streaming status
       setMessages(prev =>
         prev.map(msg =>
           msg.id === assistantMessage.id
@@ -136,8 +186,13 @@ export default function AssistantScreen() {
       );
     } catch (error: any) {
       console.error('Error sending message:', error);
-      setMessages(prev =>
-        prev.map(msg =>
+      
+      // Only update the error message if the message still exists in the state
+      setMessages(prev => {
+        const messageExists = prev.find(msg => msg.id === assistantMessage.id);
+        if (!messageExists) return prev;
+        
+        return prev.map(msg =>
           msg.id === assistantMessage.id
             ? { 
                 ...msg, 
@@ -146,8 +201,8 @@ export default function AssistantScreen() {
                 isError: true 
               }
             : msg
-        )
-      );
+        );
+      });
     } finally {
       setIsLoading(false);
     }
@@ -160,15 +215,6 @@ export default function AssistantScreen() {
       useNativeDriver: false,
     }).start();
   }, [messages.length]);
-
-  useEffect(() => {
-    // Clear timeout when component unmounts
-    return () => {
-      if (retryTimerRef.current) {
-        clearInterval(retryTimerRef.current);
-      }
-    };
-  }, []);
 
   const handleRetryConnection = async () => {
     if (isRetrying) return;
@@ -190,27 +236,6 @@ export default function AssistantScreen() {
 
     // Try to reconnect
     await checkAuthStatus();
-  };
-
-  // Display product context if available
-  const renderProductContext = () => {
-    if (!productContext.productId) return null;
-
-    return (
-      <Pressable 
-        style={styles.contextBanner}
-        onPress={() => router.push(`/product/${productContext.productId}`)}
-      >
-        <Text style={styles.contextText}>
-          Viewing: {params.productName || 'Product'} {params.modelNumber ? `(${params.modelNumber})` : ''}
-        </Text>
-        {productContext.highlightedText && (
-          <Text style={styles.highlightText}>
-            Selected text: "{productContext.highlightedText.substring(0, 50)}..."
-          </Text>
-        )}
-      </Pressable>
-    );
   };
 
   const renderHeader = () => {
@@ -365,17 +390,47 @@ export default function AssistantScreen() {
         </View>
       ) : (
         <>
-          {renderProductContext()}
+          {productContext.productId && (
+            <View style={styles.contextBanner}>
+              <Text style={styles.contextText}>
+                Viewing: {productContext.productName || 'Product'} {productContext.modelNumber ? `(${productContext.modelNumber})` : ''}
+              </Text>
+              {productContext.highlightedText && (
+                <Text style={styles.highlightText}>
+                  Selected text: "{productContext.highlightedText.substring(0, 50)}..."
+                </Text>
+              )}
+            </View>
+          )}
           <KeyboardAvoidingView 
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={styles.container}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           >
             <ScrollView
               ref={scrollViewRef}
               style={styles.messagesContainer}
-              contentContainerStyle={styles.messagesContent}
-              onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+              contentContainerStyle={[
+                styles.messagesContent,
+                { flexGrow: 1 }
+              ]}
+              onScroll={(event) => {
+                const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+                const paddingToBottom = 20;
+                setIsAtBottom(
+                  layoutMeasurement.height + contentOffset.y >=
+                  contentSize.height - paddingToBottom
+                );
+              }}
+              onContentSizeChange={() => {
+                const lastMessage = messages[messages.length - 1];
+                const isUserLastMessage = lastMessage?.sender === 'user';
+                if (isUserLastMessage || isAtBottom) {
+                  scrollViewRef.current?.scrollToEnd({ animated: true });
+                }
+              }}
+              scrollEventThrottle={16}
+              keyboardShouldPersistTaps="handled"
             >
               {renderHeader()}
               {messages.map((message) => (
@@ -530,11 +585,9 @@ const styles = StyleSheet.create({
   },
   messagesContainer: {
     flex: 1,
-    paddingHorizontal: 15,
   },
   messagesContent: {
-    paddingTop: 4,
-    paddingBottom: 10,
+    padding: 15,
   },
   messageBubble: {
     maxWidth: '80%',
@@ -574,7 +627,8 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 10,
+    padding: 8,
+    paddingBottom: Platform.OS === 'ios' ? 8 : 8,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
@@ -585,12 +639,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 20,
     paddingHorizontal: 15,
-    height: 44,
-    marginRight: 10,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+    marginRight: 8,
     fontSize: 16,
     color: '#fff',
-    paddingTop: 0,
-    paddingBottom: 0,
+    maxHeight: 100,
   },
   sendButton: {
     width: 44,

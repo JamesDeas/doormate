@@ -212,11 +212,61 @@ const AnimatedGlowButton = ({ children, onPress }: { children: React.ReactNode; 
   );
 };
 
-const renderAIAssistantButton = (product: Product, router: any, isOffline: boolean) => {
-  // Get all manual URLs with proper base URL
+// Move this outside the ProductDetailsScreen component
+const AIAssistantButton = ({ 
+  product, 
+  router, 
+  isOffline 
+}: { 
+  product: Product; 
+  router: any; 
+  isOffline: boolean;
+}) => {
+  const [discussions, setDiscussions] = useState<any[]>([]);
+  const [discussionsWithReplies, setDiscussionsWithReplies] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchDiscussions = async () => {
+      try {
+        // Fetch main discussions
+        const response = await fetch(`${API_URL}/products/${product._id}/comments`);
+        if (!response.ok) throw new Error('Failed to fetch discussions');
+        const mainDiscussions = await response.json();
+        setDiscussions(mainDiscussions);
+
+        // Fetch replies for each discussion
+        const withReplies = await Promise.all(
+          mainDiscussions.map(async (discussion: any) => {
+            try {
+              const repliesResponse = await fetch(`${API_URL}/comments/${discussion._id}/replies`);
+              if (!repliesResponse.ok) throw new Error('Failed to fetch replies');
+              const replies = await repliesResponse.json();
+              return {
+                ...discussion,
+                replies
+              };
+            } catch (error) {
+              console.error(`Error fetching replies for discussion ${discussion._id}:`, error);
+              return {
+                ...discussion,
+                replies: []
+              };
+            }
+          })
+        );
+
+        setDiscussionsWithReplies(withReplies);
+      } catch (error) {
+        console.error('Error fetching discussions:', error);
+      }
+    };
+    fetchDiscussions();
+  }, [product._id]);
+
+  // Keep manual URLs as relative paths for the AI Assistant
   const manualUrls = product.manuals?.map(manual => ({
     ...manual,
-    url: getFullUrl(manual.url)
+    url: manual.url.startsWith('/') ? manual.url : `/${manual.url}`
   }));
 
   return (
@@ -233,7 +283,8 @@ const renderAIAssistantButton = (product: Product, router: any, isOffline: boole
             productType: determineProductType(product),
             productName: product.title,
             modelNumber: product.model,
-            manuals: JSON.stringify(manualUrls)
+            manuals: JSON.stringify(manualUrls),
+            discussions: JSON.stringify(discussionsWithReplies) // Use the discussions with replies
           }
         });
       }}
@@ -787,7 +838,11 @@ export default function ProductDetailsScreen() {
             </Text>
           </View>
 
-          {renderAIAssistantButton(product, router, isOffline)}
+          <AIAssistantButton 
+            product={product} 
+            router={router} 
+            isOffline={isOffline}
+          />
           
           {/* Tab Navigation */}
           <TabNavigation />
